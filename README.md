@@ -7,6 +7,7 @@ This repo hosts a pipeline that carries out a maps-to-params analysis of multi-f
 You should install the following non-standard python packages in order to use BBPower:
 - [BBPipe](https://github.com/simonsobs/BBPipe)
 - [sacc](https://pypi.org/project/sacc/)
+- [fgbuster](https://github.com/fgbuster)
 - [emcee](https://pypi.org/project/emcee/)
 
 ### Using the code
