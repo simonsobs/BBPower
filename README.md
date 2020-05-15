@@ -12,7 +12,7 @@ You should install the following non-standard python packages in order to use BB
 ### Using the code
 First of all, have a look at the BBPipe documentation to get a broad idea of how the pipeline structure works. Then, have a look at one of the test suites in the `test` directory. For instance, a quick pipeline that takes calculated power spectra, runs an MCMC on them and creates a bunch of plots, is contained in the following files:
 - [test/test_sampling.yml](test/test_sampling.yml) describes the raw inputs of the pipeline (in this case, multi-frequency power spectra) and its stages (in this case, two stages, a likelihood sampling stage and a plotting stage).
-- [test/test_config_sampling.yml](test/test_sampling_config.yml) describes the configuration options for the different stages. This includes, for instance, the cosmological and foreground model, parameter priors, sampler options etc. All the possible options are thoroughly described there.
+- [test/test_config_sampling.yml](test/test_config_sampling.yml) describes the configuration options for the different stages. This includes, for instance, the cosmological and foreground model, parameter priors, sampler options etc. All the possible options are thoroughly described there.
 - [test/run_sampling_test.sh](test/run_sampling_test.sh) contains the commands that would be needed to run this pipeline. The commands of the form `python -m bbpower ...` are output by `BBPipe` if you just run `bbpipe ./test/test_sampling.yml --dry-run`.
 
 ### Credits and questions
