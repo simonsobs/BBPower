@@ -6,7 +6,7 @@ import os
 
 class BBPowerSummarizer(PipelineStage):
     name="BBPowerSummarizer"
-    inputs=[('splits_list',TextFile),('bandpasses_list',TextFile),('cells_fiducial',FitsFile),
+    inputs=[('splits_list',TextFile),('bandpasses_list',TextFile),
             ('cells_all_splits',FitsFile),('cells_all_sims',TextFile)]
     outputs=[('cells_coadded_total',FitsFile),('cells_coadded',FitsFile),
              ('cells_noise',FitsFile),('cells_null',FitsFile)]

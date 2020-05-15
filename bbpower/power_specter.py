@@ -15,7 +15,6 @@ class BBPowerSpecter(PipelineStage):
             ('sims_list',TextFile),('beams_list',TextFile)]
     outputs=[('cells_all_splits',FitsFile),('cells_all_sims',TextFile),('mcm',DummyFile)]
     config_options={'bpw_edges':None,
-                    'beam_correct':True,
                     'purify_B':True,
                     'n_iter':3}
 

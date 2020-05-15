@@ -11,7 +11,6 @@ BBPowerSpecter:
 
 BBPowerSummarizer:
     # Covariance types
-    do_plots: True
     nulls_covar_type: "diagonal"
     nulls_covar_diag_order: 0
     data_covar_type: "block_diagonal"
