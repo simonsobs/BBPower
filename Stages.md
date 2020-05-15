@@ -59,6 +59,8 @@ This stage takes a set of coadded multi-frequency polarization power spectra and
 ### Output
 - `param_chains`: a numpy `npz` file containing the parameter MCMC chain.
 
+### Parameters
+See [test/test_config_sampling.yml](test/test_config_sampling.yml)
 
 ## 4. BBPlotter
 ### Stage summary
@@ -75,3 +77,6 @@ This stage generates a webpage containing a set of plots illustrating the main p
 ### Outputs
 - `plots`: a directory containing all the output plots as png files.
 - `plots_page`: an HTML file containing links to all of those plots.
+
+### Parameters
+See [test/test_config_sampling.yml](test/test_config_sampling.yml)
