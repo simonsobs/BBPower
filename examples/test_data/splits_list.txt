@@ -1,0 +1,4 @@
+test/test_out/s1001/obs_split1of4.fits.gz
+test/test_out/s1001/obs_split2of4.fits.gz
+test/test_out/s1001/obs_split3of4.fits.gz
+test/test_out/s1001/obs_split4of4.fits.gz

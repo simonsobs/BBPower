@@ -1,0 +1,6 @@
+examples/data/beams/beam_LF1.txt
+examples/data/beams/beam_LF2.txt
+examples/data/beams/beam_MF1.txt
+examples/data/beams/beam_MF2.txt
+examples/data/beams/beam_UHF1.txt
+examples/data/beams/beam_UHF2.txt

@@ -1,0 +1,6 @@
+examples/data/bandpasses/LF1.txt
+examples/data/bandpasses/LF2.txt
+examples/data/bandpasses/MF1.txt
+examples/data/bandpasses/MF2.txt
+examples/data/bandpasses/UHF1.txt
+examples/data/bandpasses/UHF2.txt
