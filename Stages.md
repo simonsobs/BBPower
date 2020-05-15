@@ -4,6 +4,9 @@ Pipeline stages
 BBPower is made up of the following stages:
 
 ## 1. BBPowerSpecter
+### Stage summary
+BBPowerSpecter takes a set of maps (with their masks and other metadata), and computes all possible power spectra, cross-correlating different data splits, frequency channels and polarization channels. It does that for the data and for a number of simulations.
+
 ### Inputs
 - `splits_list`: a txt file containing a list of file paths. Each file should be a fits file containing 2 maps (Q and U) per frequency channel. Each file should correspond to one data split (i.e. a map made from only part of the data).
 - `masks_apodized`: a fits file containing one map per frequency channel. Each map should be the apodized mask to be used on all maps corresponding to that frequency channel.
