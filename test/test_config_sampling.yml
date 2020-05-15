@@ -1,19 +1,34 @@
 # These parameters are accessible to all stages
 global:
+    # HEALPix resolution parameter
     nside: 64
+    # Use D_l = l*(l+1)*C_l/(2*pi) instead of C_l?
     compute_dell: True
 
 BBCompSep:
-    # Sampler type (choose 'emcee', 'maximum_likelihood', 'single_point' or 'timing')
+    # Sampler type. Options are:
+    #  - 'emcee': a full MCMC will be run using emcee.
+    #  - 'fisher': only the Fisher matrix (i.e. the likelihood
+    #        Hessian matrix) will be calculated around the fiducial
+    #        parameters chosen as prior centers.
+    #  - 'maximum_likelihood': only the best-fit parameters will
+    #        be searched for.
+    #  - 'single_point': only the chi^2 at the value used as the
+    #        center for all parameter priors will be calculated.
+    #  - 'timing': will compute the average time taken by one
+    #        likelihood computation.
     sampler: 'emcee'
     # If you chose emcee:
     # Number of walkers
     nwalkers: 24
     # Number of iterations per walker
     n_iters: 1000
-    # Likelihood type (choose 'chi2' or 'h&l')
+    # Likelihood type. Options are:
+    #  - 'chi2': a standard chi-squared Gaussian likelihood.
+    #  - 'h&l': Hamimeche & Lewis likelihood.
     likelihood_type: 'chi2'
     # Which polarization channels do you want to include?
+    # Can be ['E'], ['B'] or ['E','B'].
     pol_channels: ['B']
     # Scale cuts (will apply to all frequencies)
     l_min: 30
@@ -45,7 +60,8 @@ BBCompSep:
             sed: Dust
             # Type of power spectra for all possible polarization channel combinations.
             # Any combinations not added here will be assumed to be zero.
-            # The names should be one of the classes in bbpower/fgcls.py
+            # The names should be one of the classes in bbpower/fgcls.py. This is quite
+            # limiter for now, so consider adding to it if you want something fancier.
             cl:
                 EE: ClPowerLaw
                 BB: ClPowerLaw
@@ -78,6 +94,9 @@ BBCompSep:
             cross:
                 # In this case the list should contain:
                 # [component name, prior type, prior parameters]
+                # Each of this will create a new parameter, corresponding to a constant
+                # scale- and frequency-independend correlation coefficient between
+                # the two components.
                 epsilon_ds: ['component_2', 'tophat', [-1., 0., 1.]]
 
         component_2:
@@ -100,8 +119,13 @@ BBCompSep:
                     l0_s_bb: ['ell0', 'fixed', [80.]]
 
 BBPlotter:
+    # Maximum ell up to which things will be plotted
     lmax_plot: 128
+    # Add total coadds to C_ell plots?
     plot_coadded_total: False
+    # Add noise spectra to C_ell plots?
     plot_noise: False
+    # Plot null tests?
     plot_nulls: False
+    # Plot likelihood?
     plot_likelihood: True
