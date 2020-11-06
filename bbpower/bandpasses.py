@@ -59,7 +59,7 @@ class Bandpass(object):
 
     def sed_CMB_RJ(self, nu):
         x = 0.01760867023799751*nu
-        ex=np.exp(x)
+        ex = np.exp(x)
         return ex*(x/(ex-1))**2
 
     def convolve_sed(self, sed, params):
