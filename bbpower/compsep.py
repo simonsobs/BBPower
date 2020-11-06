@@ -24,7 +24,7 @@ class BBCompSep(PipelineStage):
                ('config_copy', YamlFile)]
     config_options = {'likelihood_type': 'h&l', 'n_iters': 32,
                       'nwalkers': 16, 'r_init': 1.e-3,
-                      'sampler': 'emcee'}
+                      'sampler': 'emcee', 'bands': 'all'}
 
     def setup_compsep(self):
         """
@@ -108,7 +108,10 @@ class BBCompSep(PipelineStage):
             s_noi.remove_selection(ell__gt=self.config['l_max'])
             s_noi.remove_selection(ell__lt=self.config['l_min'])
 
-        tr_names = sorted(list(self.s.tracers.keys()))
+        if self.config['bands'] == 'all':
+            tr_names = sorted(list(self.s.tracers.keys()))
+        else:
+            tr_names = self.config['bands']
         self.nfreqs = len(tr_names)
         self.npol = len(self.pols)
         self.nmaps = self.nfreqs * self.npol
@@ -143,9 +146,9 @@ class BBCompSep(PipelineStage):
         self.windows = np.zeros([self.ncross, self.n_bpws, self.n_ell])
 
         # Get power spectra and covariances
-        if not (self.s.covariance.covmat.shape[-1] == len(self.s.mean) == self.n_bpws * self.ncross):
-            raise ValueError("C_ell vector's size is wrong")
-        # cv = self.s.precision.getCovarianceMatrix()
+        if self.config['bands'] == 'all':
+            if not (self.s.covariance.covmat.shape[-1] == len(self.s.mean) == self.n_bpws * self.ncross):
+                raise ValueError("C_ell vector's size is wrong")
 
         v2d = np.zeros([self.n_bpws, self.ncross])
         if self.use_handl:
