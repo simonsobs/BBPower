@@ -1,28 +1,29 @@
 import numpy as np
-
 from fgbuster.component_model import CMB
+
 
 class Bandpass(object):
     def __init__(self, nu, dnu, bnu, bp_number, config, phi_nu=None):
         self.number = bp_number
         self.nu = nu
         self.bnu_dnu = bnu * nu**2 * dnu
-        self.nu_mean = np.sum(CMB('K_RJ').eval(self.nu) * self.bnu_dnu * nu) / \
-                       np.sum(CMB('K_RJ').eval(self.nu) * self.bnu_dnu)
+        cmbs = CMB('K_RJ').eval(self.nu)
+        self.nu_mean = (np.sum(cmbs * self.bnu_dnu * nu) /
+                        np.sum(cmbs * self.bnu_dnu))
         field = 'bandpass_%d' % bp_number
 
         # Get frequency-dependent angle if necessary
         try:
-            fname=config['systematics']['bandpasses'][field]['phase_nu']
+            fname = config['systematics']['bandpasses'][field]['phase_nu']
         except KeyError:
-            fname=None
+            fname = None
             self.is_complex = False
         if fname:
             from scipy.interpolate import interp1d
-            nu_phi,phi=np.loadtxt(fname,unpack=True)
-            phif=interp1d(nu_phi, np.radians(phi),
-                          bounds_error=False, fill_value=0)
-            phi_arr=phif(self.nu)
+            nu_phi, phi = np.loadtxt(fname, unpack=True)
+            phif = interp1d(nu_phi, np.radians(phi),
+                            bounds_error=False, fill_value=0)
+            phi_arr = phif(self.nu)
             phase = np.cos(2*phi_arr) + 1j * np.sin(2*phi_arr)
             self.bnu_dnu = self.bnu_dnu * phase
             self.is_complex = True
@@ -65,27 +66,31 @@ class Bandpass(object):
             mod = abs(conv_sed)
             cs = conv_sed.real/mod
             sn = conv_sed.imag/mod
-            return mod, np.array([[cs,sn],[-sn,cs]])
+            return mod, np.array([[cs, sn],
+                                  [-sn, cs]])
         else:
             return conv_sed, None
 
     def get_rotation_matrix(self, params):
         if self.do_angle:
             phi = params[self.name_angle]
-            c=np.cos(2*phi)
-            s=np.sin(2*phi)
-            return np.array([[c,s],[-s,c]])
+            c = np.cos(2*phi)
+            s = np.sin(2*phi)
+            return np.array([[c, s],
+                             [-s, c]])
         else:
             return None
 
+
 def rotate_cells_mat(mat1, mat2, cls):
     if mat1 is not None:
-        cls=np.einsum('ijk,lk',cls,mat1)
+        cls = np.einsum('ijk,lk', cls, mat1)
     if mat2 is not None:
-        cls=np.einsum('jk,ikl',mat2,cls)
+        cls = np.einsum('jk,ikl', mat2, cls)
     return cls
 
+
 def rotate_cells(bp1, bp2, cls, params):
-    m1=bp1.get_rotation_matrix(params)
-    m2=bp2.get_rotation_matrix(params)
-    return rotate_cells_mat(m1,m2,cls)
+    m1 = bp1.get_rotation_matrix(params)
+    m2 = bp2.get_rotation_matrix(params)
+    return rotate_cells_mat(m1, m2, cls)

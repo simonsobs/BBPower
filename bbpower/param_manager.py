@@ -30,7 +30,7 @@ class ParameterManager(object):
             p = params[p_name]
             self._add_parameter(p_name, p)
 
-    def __init__(self,config):
+    def __init__(self, config):
         self.p_free_names = []
         self.p_free_priors = []
         self.p_fixed = []
@@ -50,10 +50,12 @@ class ParameterManager(object):
                     self._add_parameters(d)
             dc = c.get('cl_parameters')
             if dc:  # Power spectra
-                for cl_name,d in dc.items():
-                    p1,p2=cl_name
-                    # Add parameters only if we're using both polarization channels
-                    if (p1 in config['pol_channels']) and (p2 in config['pol_channels']):
+                for cl_name, d in dc.items():
+                    p1, p2 = cl_name
+                    # Add parameters only if we're using both
+                    # polarization channels
+                    if ((p1 in config['pol_channels']) and
+                            (p2 in config['pol_channels'])):
                         self._add_parameters(d)
 
         # Loop through different systematics
@@ -78,9 +80,9 @@ class ParameterManager(object):
     def lnprior(self, par):
         lnp = 0
         for p, pr in zip(par, self.p_free_priors):
-            if pr[1] == 'Gaussian': #Gaussian prior
+            if pr[1] == 'Gaussian':  # Gaussian prior
                 lnp += -0.5 * ((p - pr[2][0])/pr[2][1])**2
-            else: #Only other option is top-hat
+            else:  # Only other option is top-hat
                 if not(float(pr[2][0]) <= p <= float(pr[2][2])):
                     return -np.inf
         return lnp

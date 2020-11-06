@@ -28,6 +28,7 @@ class DataFile:
         """
         return open(path, mode)
 
+
 class HDFFile(DataFile):
     """
     A data file in the HDF5 format.
@@ -36,6 +37,7 @@ class HDFFile(DataFile):
 
     """
     suffix = 'hdf'
+
     @classmethod
     def open(cls, path, mode, **kwargs):
         import warnings
@@ -43,6 +45,7 @@ class HDFFile(DataFile):
             warnings.simplefilter("ignore")
             import h5py
         return h5py.File(path, mode, **kwargs)
+
 
 class FitsFile(DataFile):
     """
@@ -60,11 +63,13 @@ class FitsFile(DataFile):
             mode = 'rw'
         return fitsio.FITS(path, mode=mode, **kwargs)
 
+
 class TextFile(DataFile):
     """
     A data file in plain text format.
     """
     suffix = 'txt'
+
 
 class YamlFile(DataFile):
     """
@@ -72,25 +77,29 @@ class YamlFile(DataFile):
     """
     suffix = 'yml'
 
+
 class NpzFile(DataFile):
     """
     A data file in yaml format.
     """
     suffix = 'npz'
 
-class DirFile(DataFile) :
+
+class DirFile(DataFile):
     """
     A dummy type
     """
     suffix = 'dir'
 
-class HTMLFile(DataFile) :
+
+class HTMLFile(DataFile):
     """
     A dummy type
     """
     suffix = 'html'
 
-class DummyFile(DataFile) :
+
+class DummyFile(DataFile):
     """
     A dummy type
     """

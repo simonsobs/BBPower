@@ -1,5 +1,5 @@
 from bbpipe import PipelineStage
-from .types import TextFile, FitsFile, DirFile, HTMLFile, NpzFile
+from .types import FitsFile, DirFile, HTMLFile, NpzFile
 import sacc
 import numpy as np
 import matplotlib

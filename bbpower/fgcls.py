@@ -1,6 +1,6 @@
-import numpy as np
 import sympy
 from sympy.parsing.sympy_parser import parse_expr
+
 
 class ClGeneral(object):
     def eval(self, ell, *params):
@@ -29,10 +29,11 @@ class ClGeneral(object):
             try:
                 assert len(self._defaults) == self.n_param
             except (AttributeError, AssertionError):
-                print("Component: unexpected number of or uninitialized defaults, "
-                      "returning ones")
+                print("Component: unexpected number of or "
+                      "uninitialized defaults, returning ones")
                 return [1.] * self.n_param
             return self._defaults
+
 
 class ClAnalytic(ClGeneral):
     def __init__(self, expression, **fixed_params):
@@ -51,11 +52,12 @@ class ClAnalytic(ClGeneral):
         # Then remove it again
         self._params.pop(0)
 
-        #Create lambda function
+        # Create lambda function
         self._lambda = sympy.lambdify(symbols, self._expr, 'numpy')
 
     def __repr__(self):
         return repr(self._expr)
+
 
 class ClPowerLaw(ClAnalytic):
     _REF_ALPHA = -0.5
