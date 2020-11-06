@@ -6,7 +6,7 @@ class ParameterManager(object):
     def _add_parameter(self, p_name, p):
         # If fixed parameter, just add its name and value
         if p[1] == 'fixed':
-            self.p_fixed.append((p_name, p[2][0]))
+            self.p_fixed.append((p_name, float(p[2][0])))
             return  # Then move on
 
         # Otherwise it's free
@@ -17,10 +17,10 @@ class ParameterManager(object):
         self.p_free_names.append(p_name)
         self.p_free_priors.append(p)
         # Add fiducial value to initial vector
-        if p[1] == 'tophat':
-            p0 = p[2][1]
-        elif p[1] == 'Gaussian':
-            p0 = p[2][0]
+        if np.char.lower(p[1]) == 'tophat':
+            p0 = float(p[2][1])
+        elif np.char.lower(p[1]) == 'gaussian':
+            p0 = float(p[2][0])
         else:
             raise ValueError("Unknown prior type %s" % p[1])
         self.p0.append(p0)
@@ -52,7 +52,7 @@ class ParameterManager(object):
         comp_names = self.get_component_names(config)
         for c_name in comp_names:
             c = config['fg_model'][c_name]
-            for tag in ['sed_parameters', 'cross']:
+            for tag in ['sed_parameters', 'cross', 'decorr']:
                 d = c.get(tag)
                 if d:
                     self._add_parameters(d)
@@ -92,7 +92,7 @@ class ParameterManager(object):
     def lnprior(self, par):
         lnp = 0
         for p, pr in zip(par, self.p_free_priors):
-            if pr[1] == 'Gaussian':  # Gaussian prior
+            if np.char.lower(pr[1]) == 'gaussian':  # Gaussian prior
                 lnp += -0.5 * ((p - pr[2][0])/pr[2][1])**2
             else:  # Only other option is top-hat
                 if not(float(pr[2][0]) <= p <= float(pr[2][2])):

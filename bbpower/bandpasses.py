@@ -1,15 +1,15 @@
 import numpy as np
-from fgbuster.component_model import CMB
 
 
 class Bandpass(object):
     def __init__(self, nu, dnu, bnu, bp_number, config, phi_nu=None):
         self.number = bp_number
         self.nu = nu
-        self.bnu_dnu = bnu * nu**2 * dnu
-        cmbs = CMB('K_RJ').eval(self.nu)
-        self.nu_mean = (np.sum(cmbs * self.bnu_dnu * nu) /
-                        np.sum(cmbs * self.bnu_dnu))
+        self.bnu_dnu = bnu * dnu
+        cmbs = self.sed_CMB_RJ(self.nu)
+        self.nu_mean = (np.sum(cmbs * self.bnu_dnu * nu**3) /
+                        np.sum(cmbs * self.bnu_dnu * nu**2))
+        self.cmb_norm = np.sum(cmbs * self.bnu_dnu * nu**2)
         field = 'bandpass_%d' % bp_number
 
         # Get frequency-dependent angle if necessary
@@ -35,6 +35,8 @@ class Bandpass(object):
         self.name_gain = None
         self.do_angle = False
         self.name_angle = None
+        self.do_dphi1 = False
+        self.name_dphi1 = None
         try:
             d = config['systematics']['bandpasses'][field]['parameters']
         except KeyError:
@@ -49,15 +51,34 @@ class Bandpass(object):
             if p[0] == 'angle':
                 self.do_angle = True
                 self.name_angle = n
+            if p[0] == 'dphi1':
+                self.do_dphi1 = True
+                self.is_complex = True
+                self.name_dphi1 = n
+        return
 
-        self.cmb_norm = 1./np.sum(CMB('K_RJ').eval(self.nu) * self.bnu_dnu)
+    def sed_CMB_RJ(self, nu):
+        x = 0.01760867023799751*nu
+        ex = np.exp(x)
+        return ex*(x/(ex-1))**2
 
     def convolve_sed(self, sed, params):
         dnu = 0.
+        dphi1_phase = 1.
         if self.do_shift:
             dnu = params[self.name_shift] * self.nu_mean
 
-        conv_sed = np.sum(sed(self.nu + dnu) * self.bnu_dnu) * self.cmb_norm
+        if self.do_dphi1:
+            dphi1 = params[self.name_dphi1]
+            normed_dphi1 = dphi1 * np.pi / 180. * (self.nu - self.nu_mean) / self.nu_mean
+            dphi1_phase = np.cos(2.*normed_dphi1) + 1j * np.sin(2.*normed_dphi1)
+
+        nu_prime = self.nu + dnu
+        # CMB sed
+        if sed is None:
+            sed = self.sed_CMB_RJ
+        conv_sed = np.sum(sed(nu_prime) * self.bnu_dnu *
+                          dphi1_phase * nu_prime**2) / self.cmb_norm
 
         if self.do_gain:
             conv_sed *= params[self.name_gain]
@@ -73,7 +94,7 @@ class Bandpass(object):
 
     def get_rotation_matrix(self, params):
         if self.do_angle:
-            phi = params[self.name_angle]
+            phi = np.radians(params[self.name_angle])
             c = np.cos(2*phi)
             s = np.sin(2*phi)
             return np.array([[c, s],
@@ -94,3 +115,27 @@ def rotate_cells(bp1, bp2, cls, params):
     m1 = bp1.get_rotation_matrix(params)
     m2 = bp2.get_rotation_matrix(params)
     return rotate_cells_mat(m1, m2, cls)
+
+
+def decorrelated_bpass(bpass1, bpass2, sed, params, decorr_delta):
+    def convolved_freqs(bpass):
+        dnu = 0.
+        if bpass.do_shift:
+            dnu = params[bpass.name_shift] * bpass.nu_mean
+        nu_prime = bpass.nu + dnu
+        bnu_prime = np.abs(bpass.bnu_dnu) * nu_prime**2
+        bphi = bnu_prime * sed(nu_prime)
+        return nu_prime, bphi
+
+    nu_prime1, bphi1 = convolved_freqs(bpass1)
+    nu_prime2, bphi2 = convolved_freqs(bpass2)
+    nu1nu2 = np.outer(nu_prime1, 1./nu_prime2)
+    decorr_exp = decorr_delta**(np.log(nu1nu2)**2)
+    decorr_sed = np.einsum('i, ij, j', bphi1, decorr_exp, bphi2)
+    decorr_sed *= 1./(bpass1.cmb_norm * bpass2.cmb_norm)
+
+    if bpass1.do_gain:
+        decorr_sed *= params[bpass1.name_gain]
+    if bpass2.do_gain:
+        decorr_sed *= params[bpass2.name_gain]
+    return decorr_sed
