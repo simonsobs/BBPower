@@ -1,5 +1,4 @@
 import numpy as np
-from fgbuster.component_model import CMB
 
 
 class Bandpass(object):
@@ -7,7 +6,7 @@ class Bandpass(object):
         self.number = bp_number
         self.nu = nu
         self.bnu_dnu = bnu * dnu
-        cmbs = CMB('K_RJ').eval(self.nu)
+        cmbs = self.sed_CMB_RJ(self.nu)
         self.nu_mean = (np.sum(cmbs * self.bnu_dnu * nu**3) /
                         np.sum(cmbs * self.bnu_dnu * nu**2))
         self.cmb_norm = np.sum(cmbs * self.bnu_dnu * nu**2)
@@ -58,6 +57,11 @@ class Bandpass(object):
                 self.name_dphi1 = n
         return
 
+    def sed_CMB_RJ(self, nu):
+        x = 0.01760867023799751*nu
+        ex=np.exp(x)
+        return ex*(x/(ex-1))**2
+
     def convolve_sed(self, sed, params):
         dnu = 0.
         dphi1_phase = 1.
@@ -72,11 +76,9 @@ class Bandpass(object):
         nu_prime = self.nu + dnu
         # CMB sed
         if sed is None:
-            conv_sed = np.sum(CMB('K_RJ').eval(nu_prime) * self.bnu_dnu *
-                              dphi1_phase * nu_prime**2) / self.cmb_norm
-        else:
-            conv_sed = np.sum(sed(nu_prime) * self.bnu_dnu *
-                              dphi1_phase * nu_prime**2) / self.cmb_norm
+            sed = self.sed_CMB_RJ
+        conv_sed = np.sum(sed(nu_prime) * self.bnu_dnu *
+                          dphi1_phase * nu_prime**2) / self.cmb_norm
 
         if self.do_gain:
             conv_sed *= params[self.name_gain]
