@@ -1,0 +1,143 @@
+# These parameters are accessible to all stages
+global:
+    # HEALPix resolution parameter
+    nside: 64
+    # Use D_l = l*(l+1)*C_l/(2*pi) instead of C_l?
+    compute_dell: True
+
+BBCompSep:
+    # Sampler type. Options are:
+    #  - 'emcee': a full MCMC will be run using emcee.
+    #  - 'fisher': only the Fisher matrix (i.e. the likelihood
+    #        Hessian matrix) will be calculated around the fiducial
+    #        parameters chosen as prior centers.
+    #  - 'maximum_likelihood': only the best-fit parameters will
+    #        be searched for.
+    #  - 'single_point': only the chi^2 at the value used as the
+    #        center for all parameter priors will be calculated.
+    #  - 'timing': will compute the average time taken by one
+    #        likelihood computation.
+    sampler: 'single_point'
+    # If you chose emcee:
+    # Number of walkers
+    nwalkers: 24
+    # Number of iterations per walker
+    n_iters: 1000
+    # Likelihood type. Options are:
+    #  - 'chi2': a standard chi-squared Gaussian likelihood.
+    #  - 'h&l': Hamimeche & Lewis likelihood.
+    likelihood_type: 'chi2'
+    # Which polarization channels do you want to include?
+    # Can be ['E'], ['B'] or ['E','B'].
+    pol_channels: ['B']
+    # Scale cuts (will apply to all frequencies)
+    l_min: 30
+    l_max: 120
+
+    # CMB model
+    cmb_model:
+        # Template power spectrum. Should contained the lensed power spectra
+        # with r=0 and r=1 respectively.
+        cmb_templates: ["./examples/data/camb_lens_nobb.dat", 
+                        "./examples/data/camb_lens_r1.dat"]
+        # Free parameters
+        params:
+            # tensor-to-scalar ratio
+            # See below for the meaning of the different elements in the list.
+            r_tensor: ['r_tensor', 'tophat', [-0.1, 0.00, 0.1]]
+            # Lensing amplitude
+            A_lens: ['A_lens', 'tophat', [0.00,1.0,2.00]]
+
+    # Foreground model
+    fg_model:
+        # Include moment parameters?
+        use_moments: True
+        moments_lmax: 192
+
+        # Add one section per component. They should be called `component_X`,
+        # starting with X=1
+        component_1:
+            # Name for this component
+            name: Dust
+            # Type of SED. Should be one of the classes stored in fgbuster.components
+            # https://github.com/fgbuster/fgbuster/blob/master/fgbuster/component_model.py
+            sed: Dust
+            # Type of power spectra for all possible polarization channel combinations.
+            # Any combinations not added here will be assumed to be zero.
+            # The names should be one of the classes in bbpower/fgcls.py. This is quite
+            # limiter for now, so consider adding to it if you want something fancier.
+            cl:
+                EE: ClPowerLaw
+                BB: ClPowerLaw
+            # Parameters of the SED
+            sed_parameters:
+                # The key can be anything you want, but each parameter in the model
+                # must have a different name.
+                # The first item in the list is the name of the parameter used by fgbuster
+                # The second item is the type of prior. The last item are the numbers
+                # necessary to define the prior. They should be:
+                #  - Gaussian: [mean,sigma]
+                #  - tophat: [lower edge, start value, upper edge]
+                #  - fixed: [parameter value]
+                # nu0-type parameters can only be fixed.
+                beta_d: ['beta_d', 'Gaussian', [1.59, 0.11]]
+                temp_d: ['temp', 'fixed', [19.6]]
+                nu0_d: ['nu0', 'fixed', [353.]]
+            cl_parameters:
+                # Same for power spectrum parameters
+                # (broken down by polarization channel combinations)
+                EE:
+                   amp_d_ee: ['amp', 'tophat', [0., 10., "inf"]]
+                   alpha_d_ee: ['alpha', 'tophat', [-1., -0.42, 0.]]
+                   l0_d_ee: ['ell0', 'fixed', [80.]]
+                BB:
+                   amp_d_bb: ['amp', 'tophat', [0., 5., "inf"]]
+                   alpha_d_bb: ['alpha', 'tophat', [-1., -0.2, 0.]]
+                   l0_d_bb: ['ell0', 'fixed', [80.]]
+            # If this component should be correlated with any other, list them here
+            cross:
+                # In this case the list should contain:
+                # [component name, prior type, prior parameters]
+                # Each of this will create a new parameter, corresponding to a constant
+                # scale- and frequency-independend correlation coefficient between
+                # the two components.
+                epsilon_ds: ['component_2', 'tophat', [-1., 0., 1.]]
+            moments:
+                # Define gammas for varying spectral indices of components
+                gamma_d_beta : ['gamma_beta', 'tophat', [-6., -3.5, -2.]]
+                amp_d_beta : ['amp_beta', 'tophat', [0., 0., 1]]
+
+        component_2:
+            name: Synchrotron
+            sed: Synchrotron
+            cl:
+                EE: ClPowerLaw
+                BB: ClPowerLaw
+            sed_parameters:
+                beta_s: ['beta_pl', 'Gaussian', [-3.0, 0.3]]
+                nu0_s: ['nu0', 'fixed', [23.]]
+            cl_parameters:
+                EE:
+                    amp_s_ee: ['amp', 'tophat', [0., 4., "inf"]]
+                    alpha_s_ee: ['alpha', 'tophat', [-1., -0.6, 0.]]
+                    l0_s_ee: ['ell0', 'fixed', [80.]]
+                BB:
+                    amp_s_bb: ['amp', 'tophat', [0., 2., "inf"]]
+                    alpha_s_bb: ['alpha', 'tophat', [-1., -0.4, 0.]]
+                    l0_s_bb: ['ell0', 'fixed', [80.]]
+            moments:
+                # Define gammas for varying spectral indices of components
+                gamma_s_beta : ['gamma_beta', 'tophat', [-6., -3.5, -2.]]
+                amp_s_beta : ['amp_beta', 'tophat', [0., 0., 1]]
+
+BBPlotter:
+    # Maximum ell up to which things will be plotted
+    lmax_plot: 128
+    # Add total coadds to C_ell plots?
+    plot_coadded_total: False
+    # Add noise spectra to C_ell plots?
+    plot_noise: False
+    # Plot null tests?
+    plot_nulls: False
+    # Plot likelihood?
+    plot_likelihood: True

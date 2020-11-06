@@ -15,13 +15,18 @@ class FGModel:
         self.load_foregrounds(config)
         return
 
+    def component_iterator(self, config):
+        for key, component in config['fg_model'].items():
+            if key.startswith('component_'):
+                yield key, component
+
     def load_foregrounds(self, config):
         self.component_names = []
         self.components = {}
         self.component_order = {}
 
         i_comp = 0
-        for key, component in config['fg_model'].items():
+        for key, component in self.component_iterator(config):
             comp = {}
 
             comp['names_x_dict'] = {}
@@ -89,6 +94,14 @@ class FGModel:
                         else:
                             val = None
                         params_fgl[k][l[0]] = val
+
+            # Moment parameters
+            comp['names_moments_dict'] = {}
+            d = component.get('moments')
+            if d and config['fg_model'].get('use_moments'):
+                comp['moments_pameters'] = component['moments']
+                for k, l in component['moments'].items():
+                    comp['names_moments_dict'][l[0]] = k
 
             # Set Cl functions
             comp['cl'] = {}
