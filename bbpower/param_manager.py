@@ -30,6 +30,13 @@ class ParameterManager(object):
             p = params[p_name]
             self._add_parameter(p_name, p)
 
+    def get_component_names(self, config):
+        comps = []
+        for c_name in config['fg_model'].keys():
+            if c_name.startswith('component_'):
+                comps.append(c_name)
+        return sorted(comps)
+
     def __init__(self, config):
         self.p_free_names = []
         self.p_free_priors = []
@@ -42,7 +49,8 @@ class ParameterManager(object):
             self._add_parameters(d['params'])
 
         # Loop through FG components
-        for c_name in sorted(config['fg_model'].keys()):
+        comp_names = self.get_component_names(config)
+        for c_name in comp_names:
             c = config['fg_model'][c_name]
             for tag in ['sed_parameters', 'cross']:
                 d = c.get(tag)
@@ -57,6 +65,10 @@ class ParameterManager(object):
                     if ((p1 in config['pol_channels']) and
                             (p2 in config['pol_channels'])):
                         self._add_parameters(d)
+
+            dm = c.get('moments')
+            if dm and config['fg_model'].get('use_moments'):  # Moments
+                self._add_parameters(dm)
 
         # Loop through different systematics
         if 'systematics' in config.keys():
