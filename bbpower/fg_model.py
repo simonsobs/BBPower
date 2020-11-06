@@ -29,6 +29,14 @@ class FGModel:
         for key, component in self.component_iterator(config):
             comp = {}
 
+            decorr = component.get('decorr')
+            comp['decorr'] = False
+            if decorr:
+                comp['decorr'] = True
+                comp['decorr_param_names'] = {}
+                for k, l in decorr.items():
+                    comp['decorr_param_names'][l[0]] = k
+
             comp['names_x_dict'] = {}
             d_x = component.get('cross')
             if d_x:
@@ -37,6 +45,8 @@ class FGModel:
                         raise KeyError("Component %s " % (par[0]) +
                                        "is not a valid component" +
                                        "to correlate %s with" % key)
+                    if par[0] == key:
+                        raise KeyError("%s is cross correlated with itself." % par[0])
                     comp['names_x_dict'][par[0]] = pn
 
             # Loop through SED parameters.
