@@ -30,6 +30,7 @@ class BBCompSep(PipelineStage):
         self.load_cmb()
         self.fg_model = FGModel(self.config)
         self.params = ParameterManager(self.config)
+        self.hybridparams = np.load(self.config['resid_seds'])
         if self.use_handl:
             self.prepare_h_and_l()
         return
@@ -70,16 +71,13 @@ class BBCompSep(PipelineStage):
         """
         Reads the data in the sacc file included the power spectra, bandpasses, and window functions. 
         """
-        #Decide if you're using H&L
         self.use_handl = self.config['likelihood_type'] == 'h&l'
 
-        #Read data
         self.s = sacc.Sacc.load_fits(self.get_input('cells_coadded'))
         if self.use_handl:
             s_fid = sacc.Sacc.load_fits(self.get_input('cells_fiducial'))
             s_noi = sacc.Sacc.load_fits(self.get_input('cells_noise'))
 
-        # Keep only desired correlations
         self.pols = self.config['pol_channels']
         corr_all = ['cl_ee', 'cl_eb', 'cl_be', 'cl_bb']
         corr_keep = []
@@ -94,7 +92,6 @@ class BBCompSep(PipelineStage):
                     s_fid.remove_selection(c)
                     s_noi.remove_selection(c)
 
-        # Scale cuts
         self.s.remove_selection(ell__gt=self.config['l_max'])
         self.s.remove_selection(ell__lt=self.config['l_min'])
         if self.use_handl:
@@ -111,7 +108,6 @@ class BBCompSep(PipelineStage):
         self.ncross = (self.nmaps * (self.nmaps + 1)) // 2
         self.pol_order=dict(zip(self.pols,range(self.npol)))
 
-        #Collect bandpasses
         self.bpss = []
         for i_t, tn in enumerate(tr_names):
             t = self.s.tracers[tn]
@@ -123,24 +119,18 @@ class BBCompSep(PipelineStage):
             bnu = t.bandpass
             self.bpss.append(Bandpass(nu, dnu, bnu, i_t+1, self.config))
 
-        # Get ell sampling
-        # Example power spectrum
         self.ell_b, _ = self.s.get_ell_cl('cl_' + 2 * self.pols[0].lower(),
                                           tr_names[0], tr_names[0])
-        #Avoid l<2
         win0 = self.s.data[0]['window']
         mask_w = win0.values > 1
         self.bpw_l = win0.values[mask_w]
         self.n_ell = len(self.bpw_l)
         self.n_bpws = len(self.ell_b)
-        # D_ell factor
         self.dl2cl = 2 * np.pi / (self.bpw_l * (self.bpw_l + 1))
         self.windows = np.zeros([self.ncross, self.n_bpws, self.n_ell])
 
-        #Get power spectra and covariances
         if not (self.s.covariance.covmat.shape[-1] == len(self.s.mean) == self.n_bpws * self.ncross):
             raise ValueError("C_ell vector's size is wrong")
-        ###cv = self.s.precision.getCovarianceMatrix()
 
         v2d = np.zeros([self.n_bpws, self.ncross])
         if self.use_handl:
@@ -151,7 +141,6 @@ class BBCompSep(PipelineStage):
         self.vector_indices = self.vector_to_matrix(np.arange(self.ncross, dtype=int)).astype(int)
         self.indx = []
 
-        #Parse into the right ordering
         for b1, b2, p1, p2, m1, m2, ind_vec in self._freq_pol_iterator():
             t1 = tr_names[b1]
             t2 = tr_names[b2]
@@ -196,7 +185,6 @@ class BBCompSep(PipelineStage):
         mask = (self.cmb_ells <= self.bpw_l.max()) & (self.cmb_ells > 1)
         self.cmb_ells = self.cmb_ells[mask]
 
-        # TODO: this is a patch
         nell = len(self.cmb_ells)
         self.cmb_tens = np.zeros([self.npol, self.npol, nell])
         self.cmb_lens = np.zeros([self.npol, self.npol, nell])
@@ -221,15 +209,23 @@ class BBCompSep(PipelineStage):
             sed_params = [params[comp['names_sed_dict'][k]] 
                           for k in comp['sed'].params]
             rot_matrices.append([])
-            def sed(nu):
-                return comp['sed'].eval(nu, *sed_params)
+
+            if self.config.get("diff"):
+                def sed(nu):
+                    return comp['sed'].diff(nu, *sed_params)
+            else:
+                def sed(nu):
+                    return comp['sed'].eval(nu, *sed_params)
 
             for tn in range(self.nfreqs):
                 sed_b, rot = self.bpss[tn].convolve_sed(sed, params)
                 fg_scaling[i_c, tn] = sed_b * units
                 rot_matrices[i_c].append(rot)
+            
+            if self.config.get("diff"):
+                fg_scaling[i_c] = np.dot(self.hybridparams['Q'], fg_scaling[i_c])
 
-        return fg_scaling.T,rot_matrices
+        return fg_scaling.T, rot_matrices
 
     def evaluate_power_spectra(self, params):
         fg_pspectra = np.zeros([self.fg_model.n_components,
@@ -268,28 +264,23 @@ class BBCompSep(PipelineStage):
         fg_scaling, rot_m = self.integrate_seds(params)  # [nfreq, ncomp], [ncomp,nfreq,[matrix]]
         fg_cell = self.evaluate_power_spectra(params)  # [ncomp,ncomp,npol,npol,nell]
 
-        # Add all components scaled in frequency (and HWP-rotated if needed)
         cls_array_fg = np.zeros([self.nfreqs,self.nfreqs,self.n_ell,self.npol,self.npol])
         fg_cell = np.transpose(fg_cell, axes = [0,1,4,2,3])  # [ncomp,ncomp,nell,npol,npol]
         cmb_cell = np.transpose(cmb_cell, axes = [2,0,1]) # [nell,npol,npol]
         for f1 in range(self.nfreqs):
-            for f2 in range(f1,self.nfreqs):  # Note that we only need to fill in half of the frequencies
+            for f2 in range(f1,self.nfreqs):
                 cls=cmb_cell.copy()
 
-                # Loop over component pairs
                 for c1 in range(self.fg_model.n_components):
                     mat1=rot_m[c1][f1]
                     a1=fg_scaling[f1,c1]
                     for c2 in range(self.fg_model.n_components):
                         mat2=rot_m[c2][f2]
                         a2=fg_scaling[f2,c2]
-                        # Rotate if needed
                         clrot=rotate_cells_mat(mat2,mat1,fg_cell[c1,c2])
-                        # Scale in frequency and add
                         cls += clrot*a1*a2
                 cls_array_fg[f1,f2]=cls
 
-        # Window convolution
         cls_array_list = np.zeros([self.n_bpws, self.nfreqs, self.npol, self.nfreqs, self.npol])
         for f1 in range(self.nfreqs):
             for p1 in range(self.npol):
@@ -304,7 +295,6 @@ class BBCompSep(PipelineStage):
                         if m1!=m2:
                             cls_array_list[:, f2, p2, f1, p1] = clband
 
-        # Polarization angle rotation
         for f1 in range(self.nfreqs):
             for f2 in range(self.nfreqs):
                 cls_array_list[:,f1,:,f2,:] = rotate_cells(self.bpss[f2], self.bpss[f1],
