@@ -558,7 +558,6 @@ class BBCompSep(PipelineStage):
         return dx_vec
 
     def h_and_l(self, C, Chat, Cfl_sqrt):
-        diag, U = np.linalg.eigh(C)
         try:
             diag, U = np.linalg.eigh(C)
         except:
@@ -569,7 +568,6 @@ class BBCompSep(PipelineStage):
             rot[i, :] /= root
             rot[:, i] /= root
         U.dot(rot.dot(U.T), rot)
-        diag, rot = np.linalg.eigh(rot)
         try:
             diag, rot = np.linalg.eigh(rot)
         except:

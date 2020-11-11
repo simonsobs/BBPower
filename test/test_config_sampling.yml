@@ -17,7 +17,7 @@ BBCompSep:
     #        center for all parameter priors will be calculated.
     #  - 'timing': will compute the average time taken by one
     #        likelihood computation.
-    sampler: 'emcee'
+    sampler: 'maximum_likelihood'
     # If you chose emcee:
     # Number of walkers
     nwalkers: 24
@@ -26,10 +26,10 @@ BBCompSep:
     # Likelihood type. Options are:
     #  - 'chi2': a standard chi-squared Gaussian likelihood.
     #  - 'h&l': Hamimeche & Lewis likelihood.
-    likelihood_type: 'chi2'
+    likelihood_type: 'h&l'
     # Which polarization channels do you want to include?
     # Can be ['E'], ['B'] or ['E','B'].
-    pol_channels: ['B']
+    pol_channels: ['E','B']
     # Scale cuts (will apply to all frequencies)
     l_min: 30
     l_max: 120
