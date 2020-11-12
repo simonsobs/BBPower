@@ -51,7 +51,7 @@ _, nfreqs = seds.shape
 bpw_freq_sig=np.einsum('ik,jm,iljno',seds,seds,bpw_comp)
 
 # N_ell
-sens=1
+sens=2
 knee=1
 ylf=1
 fsky=0.1
