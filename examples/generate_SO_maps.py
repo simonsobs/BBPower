@@ -1,4 +1,5 @@
 from utils import *
+import os
 import numpy as np
 import noise_calc as nc
 from optparse import OptionParser
@@ -39,7 +40,7 @@ _, Qc, Uc = hp.synfast([cl0, clcee, clcbb, cl0, cl0, cl0],
 map_comp = np.array([[Qc, Uc],
                      [Qs, Us],
                      [Qd, Ud]])
-bpss = {n: Bpass(n, f'examples/data/bandpasses/{n}.txt')
+bpss = {n: Bpass(n,f'examples/data/bandpasses/{n}.txt')
         for n in band_names}
 seds = get_convolved_seds(band_names, bpss)
 _, nfreqs = seds.shape
