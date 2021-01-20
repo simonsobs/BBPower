@@ -19,7 +19,7 @@ BBPowerSummarizer:
 BBCompSep:
     # Sampler type (choose 'emcee', 'polychord', 'maximum_likelihood', 
     # 'single_point' or 'timing')
-    sampler: 'polychord'
+    sampler: 'emcee'
     # If you chose polychord:
     nlive: 200
     nrepeat: 200
@@ -117,8 +117,8 @@ BBCompSep:
                     l0_s_bb: ['ell0', 'fixed', [80.]]
 
 BBPlotter:
-    lmax_plot: 128
-    plot_coadded_total: True
-    plot_noise: True
-    plot_nulls: True
+    lmax_plot: 300
+    plot_coadded_total: False
+    plot_noise: False
+    plot_nulls: False
     plot_likelihood: True

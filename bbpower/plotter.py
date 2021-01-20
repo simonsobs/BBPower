@@ -191,10 +191,10 @@ class BBPlotter(PipelineStage):
                    'r_tensor':0.,
                    'beta_d':1.59,
                    'epsilon_ds':0.,
-                   'alpha_d_bb':-0.42,
+                   'alpha_d_bb':-0.2,
                    'amp_d_bb':5.,
                    'beta_s':-3.,
-                   'alpha_s_bb':-0.6,
+                   'alpha_s_bb':-0.4,
                    'amp_s_bb':2.}
 
             # Select only parameters for which we have labels

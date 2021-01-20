@@ -678,6 +678,7 @@ class BBCompSep(PipelineStage):
         settings.boost_posterior = 10  # Increase number of posterior samples
         settings.nprior = 200          # Draw nprior initial prior samples
         settings.maximise = True       # Maximize posterior at the end
+        settings.read_resume = False   # Read from resume file of earlier run
         settings.feedback = 2          # Verbosity {0,1,2,3}
 
         output = pypolychord.run_polychord(likelihood, ndim, nder, settings, 
