@@ -36,7 +36,6 @@ overall_config = yaml.load(open(f'{config_dir}/config_copy.yml'), Loader=yaml.Fu
 conf = overall_config.get('BBCompSep', {})
 params = ParameterManager(conf)
 prior = {n:pr for n, pr in zip(params.p_free_names, params.p_free_priors)}
-#print(f'prior:\n{prior}')
 
 # Create .paramnames file used by getdist
 names = []

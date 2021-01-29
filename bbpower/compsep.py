@@ -579,15 +579,7 @@ class BBCompSep(PipelineStage):
         if not np.isfinite(prior):
             return -np.inf
 
-        params = self.params.build_params(par)
-        if self.use_handl:
-            dx = self.h_and_l_dx(params)
-            if np.any(np.isinf(dx)):
-                return -np.inf
-        else:
-            dx = self.chi_sq_dx(params)
-        like = -0.5 * np.dot(dx, np.dot(self.invcov, dx))
-        return prior + like
+        return prior + lnlike(par)
 
     def lnlike(self, par):
         """
@@ -601,6 +593,7 @@ class BBCompSep(PipelineStage):
         else:
             dx = self.chi_sq_dx(params)
         like = -0.5 * np.dot(dx, np.dot(self.invcov, dx))
+        
         return like
 
     def emcee_sampler(self):

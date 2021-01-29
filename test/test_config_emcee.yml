@@ -21,8 +21,8 @@ BBCompSep:
     # 'single_point' or 'timing')
     sampler: 'emcee'
     # If you chose polychord:
-    nlive: 200
-    nrepeat: 200
+    nlive: 50
+    nrepeat: 50
     # If you chose emcee:
     nwalkers: 24
     n_iters: 1000
