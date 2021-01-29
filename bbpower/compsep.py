@@ -579,7 +579,7 @@ class BBCompSep(PipelineStage):
         if not np.isfinite(prior):
             return -np.inf
 
-        return prior + lnlike(par)
+        return prior + self.lnlike(par)
 
     def lnlike(self, par):
         """
