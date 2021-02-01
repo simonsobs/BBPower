@@ -579,6 +579,12 @@ class BBCompSep(PipelineStage):
         if not np.isfinite(prior):
             return -np.inf
 
+        return prior + self.lnlike(par)
+
+    def lnlike(self, par):
+        """
+        Likelihood without priors. 
+        """
         params = self.params.build_params(par)
         if self.use_handl:
             dx = self.h_and_l_dx(params)
@@ -587,7 +593,8 @@ class BBCompSep(PipelineStage):
         else:
             dx = self.chi_sq_dx(params)
         like = -0.5 * np.dot(dx, np.dot(self.invcov, dx))
-        return prior + like
+        
+        return like
 
     def emcee_sampler(self):
         """
@@ -628,6 +635,49 @@ class BBCompSep(PipelineStage):
                 sampler.run_mcmc(pos, nsteps_use, store=True, progress=False)
 
         return sampler
+
+    def polychord_sampler(self):
+        import pypolychord
+        from pypolychord.settings import PolyChordSettings
+        from pypolychord.priors import UniformPrior, GaussianPrior
+
+        ndim = len(self.params.p0)
+        nder = 0
+
+        # Log-likelihood compliant with PolyChord's input
+        def likelihood(theta):
+            return self.lnlike(theta), [0]
+
+        def prior(hypercube):
+            prior = []
+            for h, pr in zip(hypercube, self.params.p_free_priors):
+                if pr[1] == 'Gaussian':
+                    prior.append(GaussianPrior(float(pr[2][0]), float(pr[2][1]))(h))
+                else:
+                    prior.append(UniformPrior(float(pr[2][0]), float(pr[2][2]))(h))
+            return prior
+
+        # Optional dumper function giving run-time read access to
+        # the live points, dead points, weights and evidences
+        def dumper(live, dead, logweights, logZ, logZerr):
+            print("Last dead point:", dead[-1])
+
+        settings = PolyChordSettings(ndim, nder)
+        settings.base_dir = self.get_output('param_chains')[:-4] # Remove ".npz"
+        settings.file_root = 'pch'
+        settings.nlive = self.config['nlive']
+        settings.num_repeats = self.config['nrepeat']
+        settings.do_clustering = False # Assume unimodal posterior
+        settings.boost_posterior = 10  # Increase number of posterior samples
+        settings.nprior = 200          # Draw nprior initial prior samples
+        settings.maximise = True       # Maximize posterior at the end
+        settings.read_resume = False   # Read from resume file of earlier run
+        settings.feedback = 2          # Verbosity {0,1,2,3}
+
+        output = pypolychord.run_polychord(likelihood, ndim, nder, settings, 
+                                           prior, dumper)
+
+        return output
 
     def minimizer(self):
         """
@@ -694,6 +744,9 @@ class BBCompSep(PipelineStage):
             np.savez(self.get_output('param_chains'),
                      chain=sampler.chain,
                      names=self.params.p_free_names)
+            print("Finished sampling")
+        elif self.config.get('sampler')=='polychord':
+            sampler = self.polychord_sampler()
             print("Finished sampling")
         elif self.config.get('sampler') == 'fisher':
             p0, fisher = self.fisher()

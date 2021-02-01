@@ -6,8 +6,8 @@ global:
 BBPowerSpecter:
     # Bandpower definition
     bpw_edges: "./examples/test_data/bpw_edges.txt"
-    purify_B: False
-    n_iter : 0
+    purify_B: True
+    n_iter : 3
 
 BBPowerSummarizer:
     # Covariance types
@@ -17,20 +17,24 @@ BBPowerSummarizer:
     data_covar_diag_order: 0
 
 BBCompSep:
-    # Sampler type (choose 'emcee', 'maximum_likelihood', 'single_point' or 'timing')
-    sampler: 'single_point'
+    # Sampler type (choose 'emcee', 'polychord', 'maximum_likelihood', 
+    # 'single_point' or 'timing')
+    sampler: 'polychord'
+    # If you chose polychord:
+    nlive: 50
+    nrepeat: 50
     # If you chose emcee:
-    # Number of walkers
-    nwalkers: 128
-    # Number of iterations per walker
+    nwalkers: 24
     n_iters: 1000
     # Likelihood type (choose 'chi2' or 'h&l')
     likelihood_type: 'chi2'
+    # What is the starting point?
+    r_init: 1.e-3
     # Which polarization channels do you want to include?
     pol_channels: ['B']
     # Scale cuts (will apply to all frequencies)
     l_min: 30
-    l_max: 120
+    l_max: 300
 
     # CMB model
     cmb_model:
@@ -44,7 +48,7 @@ BBCompSep:
             # See below for the meaning of the different elements in the list.
             r_tensor: ['r_tensor', 'tophat', [-0.1, 0.00, 0.1]]
             # Lensing amplitude
-            A_lens: ['A_lens', 'tophat', [0.00,1.0,2.00]]
+            A_lens: ['A_lens', 'tophat', [0.00, 1.0, 2.00]]
 
     # Foreground model
     fg_model:
@@ -80,11 +84,11 @@ BBCompSep:
                 # Same for power spectrum parameters
                 # (broken down by polarization channel combinations)
                 EE:
-                   amp_d_ee: ['amp', 'tophat', [0., 10., "inf"]]
+                   amp_d_ee: ['amp', 'tophat', [0., 10., 20.]]
                    alpha_d_ee: ['alpha', 'tophat', [-1., -0.42, 0.]]
                    l0_d_ee: ['ell0', 'fixed', [80.]]
                 BB:
-                   amp_d_bb: ['amp', 'tophat', [0., 5., "inf"]]
+                   amp_d_bb: ['amp', 'tophat', [0., 5., 10.]]
                    alpha_d_bb: ['alpha', 'tophat', [-1., -0.2, 0.]]
                    l0_d_bb: ['ell0', 'fixed', [80.]]
             # If this component should be correlated with any other, list them here
@@ -104,11 +108,11 @@ BBCompSep:
                 nu0_s: ['nu0', 'fixed', [23.]]
             cl_parameters:
                 EE:
-                    amp_s_ee: ['amp', 'tophat', [0., 4., "inf"]]
+                    amp_s_ee: ['amp', 'tophat', [0., 4., 8.]]
                     alpha_s_ee: ['alpha', 'tophat', [-1., -0.6, 0.]]
                     l0_s_ee: ['ell0', 'fixed', [80.]]
                 BB:
-                    amp_s_bb: ['amp', 'tophat', [0., 2., "inf"]]
+                    amp_s_bb: ['amp', 'tophat', [0., 2., 4.]]
                     alpha_s_bb: ['alpha', 'tophat', [-1., -0.4, 0.]]
                     l0_s_bb: ['ell0', 'fixed', [80.]]
 
@@ -117,4 +121,4 @@ BBPlotter:
     plot_coadded_total: True
     plot_noise: True
     plot_nulls: True
-    plot_likelihood: False
+    plot_likelihood: True

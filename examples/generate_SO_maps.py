@@ -1,4 +1,5 @@
 from utils import *
+import os
 import numpy as np
 import noise_calc as nc
 from optparse import OptionParser
