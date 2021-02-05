@@ -173,6 +173,8 @@ def get_bbpower_config(info):
     nu0_dust = 353.
     use_moments = info['fg'].get("use_moments", False)
     sampler = info.get('sampler', 'single_point')
+    nwalkers = info.get('nwalkers', 128)
+    nsamples = info.get('nsamples', 10000)
 
     stout=""
     stout+="# These parameters are accessible to all stages\n"
@@ -197,9 +199,9 @@ def get_bbpower_config(info):
     stout+=f"    sampler: {sampler}\n"
     stout+="    # If you chose emcee:\n"
     stout+="    # Number of walkers\n"
-    stout+="    nwalkers: 24\n"
+    stout+=f"    nwalkers: {nwalkers}\n"
     stout+="    # Number of iterations per walker\n"
-    stout+="    n_iters: 1000\n"
+    stout+=f"    n_iters: {nsamples}\n"
     stout+="    # Likelihood type. Options are:\n"
     stout+="    #  - 'chi2': a standard chi-squared Gaussian likelihood.\n"
     stout+="    #  - 'h&l': Hamimeche & Lewis likelihood.\n"
@@ -312,10 +314,11 @@ def get_bbpower_config(info):
 
 
 params = {}
-for fname in sys.argv[1:]:
+for fname in sys.argv[1:-1]:
     with open(fname) as f:
         d = yaml.safe_load(f)
         params.update(d)
+params.update({'prefix_out': sys.argv[-1]})
 
 os.system('mkdir -p ' + params['prefix_out'])
 print("Generating data")
