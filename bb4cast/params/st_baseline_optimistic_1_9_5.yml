@@ -1,0 +1,8 @@
+prefix_out: so_nominal_baseline_optimistic
+sensitivity: baseline
+one_over_f: optimistic
+ydet_LF: 1.
+ydet_MF: 9.
+ydet_UHF: 5.
+recompute_data: False
+pyexec: python
