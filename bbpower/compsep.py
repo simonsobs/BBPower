@@ -30,7 +30,8 @@ class BBCompSep(PipelineStage):
         self.load_cmb()
         self.fg_model = FGModel(self.config)
         self.params = ParameterManager(self.config)
-        self.hybridparams = np.load(self.config['resid_seds'])
+        if self.config.get("diff"):
+            self.hybridparams = np.load(self.config['resid_seds'])
         if self.use_handl:
             self.prepare_h_and_l()
         return
