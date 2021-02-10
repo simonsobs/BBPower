@@ -337,6 +337,16 @@ class BBCompSep(PipelineStage):
         cmb_cell = (params['r_tensor'] * self.cmb_tens +
                     params['A_lens'] * self.cmb_lens +
                     self.cmb_scal) * self.dl2cl
+        # [nell,npol,npol]
+        cmb_cell = np.transpose(cmb_cell, axes=[2, 0, 1])
+        if self.config['cmb_model'].get('use_birefringence'):
+            bi_angle = np.radians(params['birefringence'])
+            c = np.cos(2*bi_angle)
+            s = np.sin(2*bi_angle)
+            bmat = np.array([[c, s],
+                             [-s, c]])
+            cmb_cell = rotate_cells_mat(bmat, bmat, cmb_cell)
+        
         # [ncomp, ncomp, nfreq, nfreq], [ncomp, nfreq,[matrix]]
         fg_scaling, rot_m = self.integrate_seds(params)
         # [ncomp,npol,npol,nell]
@@ -348,8 +358,6 @@ class BBCompSep(PipelineStage):
                                  self.n_ell, self.npol, self.npol])
         # [ncomp,nell,npol,npol]
         fg_cell = np.transpose(fg_cell, axes=[0, 3, 1, 2])
-        # [nell,npol,npol]
-        cmb_cell = np.transpose(cmb_cell, axes=[2, 0, 1])
 
         # SED scaling
         cmb_scaling = np.ones(self.nfreqs)

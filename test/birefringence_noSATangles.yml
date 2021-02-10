@@ -1,0 +1,61 @@
+BBCompSep:
+    sampler: 'emcee'
+    nwalkers: 128
+    n_iters: 20000
+
+    likelihood_type: 'chi2'
+    pol_channels: ['E', 'B']
+    l_min: 30
+    l_max: 300
+
+    cmb_model:
+        cmb_templates: ["./examples/data/camb_lens_nobb.dat", 
+                        "./examples/data/camb_lens_r1.dat"]
+        params:
+            r_tensor: ['r_tensor', 'tophat', [-0.1, 0., 0.1]]
+            A_lens: ['A_lens', 'tophat', [0.0, 1., 2.0]]
+            birefringence: ['birefringence', 'tophat', [-30., 0., 30.]]
+        use_birefringence: True
+
+    fg_model:
+        component_1:
+            name: Dust
+            sed: Dust
+            cl:
+                EE: ClPowerLaw
+                BB: ClPowerLaw
+            sed_parameters:
+                beta_d: ['beta_d', 'gaussian', [1.59, 0.3]]
+                temp_d: ['temp', 'fixed', [19.6]]
+                nu0_d: ['nu0', 'fixed', [353.]]
+            cl_parameters:
+                EE:
+                   amp_d_ee: ['amp', 'tophat', [0., 40., "inf"]]
+                   alpha_d_ee: ['alpha', 'tophat', [-4., -0.4, 1.]]
+                   l0_d_ee: ['ell0', 'fixed', [80.]]
+                BB:
+                   amp_d_bb: ['amp', 'tophat', [0., 20., "inf"]]
+                   alpha_d_bb: ['alpha', 'tophat', [-4., -0.2, 1.]]
+                   l0_d_bb: ['ell0', 'fixed', [80.]]
+            cross:
+                epsilon_ds: ['component_2', 'tophat', [-1., 0.2, 1.]]
+
+        component_2:
+            name: Synchrotron
+            sed: Synchrotron
+            cl:
+                EE: ClPowerLaw
+                BB: ClPowerLaw
+            sed_parameters:
+                beta_s: ['beta_pl', 'gaussian', [-3., 0.3]]
+                nu0_s: ['nu0', 'fixed', [23.]]
+            cl_parameters:
+                EE:
+                    amp_s_ee: ['amp', 'tophat', [0., 10., "inf"]]
+                    alpha_s_ee: ['alpha', 'tophat', [-4., -0.8, 1.]]
+                    l0_s_ee: ['ell0', 'fixed', [80.]]
+                BB:
+                    amp_s_bb: ['amp', 'tophat', [0., 5., "inf"]]
+                    alpha_s_bb: ['alpha', 'tophat', [-4., -0.6, 1.]]
+                    l0_s_bb: ['ell0', 'fixed', [80.]]
+
