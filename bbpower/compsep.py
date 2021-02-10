@@ -368,10 +368,8 @@ class BBCompSep(PipelineStage):
         Sample the model with MCMC. 
         """
         import emcee
-        from multiprocessing import Pool
         
         fname_temp = self.get_output('param_chains')+'.h5'
-
         backend = emcee.backends.HDFBackend(fname_temp)
 
         nwalkers = self.config['nwalkers']
@@ -381,19 +379,21 @@ class BBCompSep(PipelineStage):
 
         if not found_file:
             backend.reset(nwalkers,ndim)
-            pos = [self.params.p0 + 1.e-3*np.random.randn(ndim) for i in range(nwalkers)]
+            p0= self.minimizer()
+            pos = [p0 + 1.e-3*np.random.randn(ndim) for i in range(nwalkers)]
             nsteps_use = n_iters
         else:
             print("Restarting from previous run")
             pos = None
             nsteps_use = max(n_iters-len(backend.get_chain()), 0)
-                                    
-        with Pool() as pool:
-            sampler = emcee.EnsembleSampler(nwalkers, ndim, self.lnprob,backend=backend)
-            if nsteps_use > 0:
-                sampler.run_mcmc(pos, nsteps_use, store=True, progress=True);
 
-        return sampler
+        import time
+        start = time.time()
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, self.lnprob, backend=backend)
+        if nsteps_use > 0:
+            sampler.run_mcmc(pos, nsteps_use, store=True, progress=True);
+        end = time.time()
+        return sampler, end-start
 
     def minimizer(self):
         """
@@ -435,19 +435,16 @@ class BBCompSep(PipelineStage):
         for i in range(n_eval):
             lik = self.lnprob(self.params.p0)
         end = time.time()
-
         return end-start, (end-start)/n_eval
 
     def run(self):
         from shutil import copyfile
-        copyfile(self.get_input('config'), self.get_output('config_copy')) 
         self.setup_compsep()
         if self.config.get('sampler')=='emcee':
-            sampler = self.emcee_sampler()
+            sampler, timing = self.emcee_sampler()
             np.savez(self.get_output('param_chains'),
-                     chain=sampler.chain,         
-                     names=self.params.p_free_names)
-            print("Finished sampling")
+                     names=self.params.p_free_names, time=timing)
+            print("Finished sampling: ", timing)
         elif self.config.get('sampler')=='fisher':
             fisher = self.fisher()
             cov = np.linalg.inv(fisher)
