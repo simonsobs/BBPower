@@ -379,7 +379,7 @@ class BBCompSep(PipelineStage):
 
         if not found_file:
             backend.reset(nwalkers,ndim)
-            p0= self.minimizer()
+            p0 = self.minimizer()
             pos = [p0 + 1.e-3*np.random.randn(ndim) for i in range(nwalkers)]
             nsteps_use = n_iters
         else:

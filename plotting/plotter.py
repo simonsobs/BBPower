@@ -1,12 +1,10 @@
 import numpy as np
+import matplotlib as mpl
+import glob
 from getdist import plots, MCSamples
 from labels import alllabels, allranges
-import matplotlib as mpl
 
-#allfs = glob.glob('/mnt/zfsusers/mabitbol/BBPower/residual_noiseless/sim0*/output*/')
-#allfs.sort()
-
-allfs = glob.glob('/mnt/zfsusers/mabitbol/BBPower/baseline_noiseless/sim0*/output*/')
+allfs = glob.glob('/mnt/zfsusers/mabitbol/BBPower/baseline_full/sim0*/output*/')
 allfs.sort()
 
 def getdist_clean(fdir):
@@ -20,7 +18,8 @@ def getdist_clean(fdir):
     return gd_samps
 
 for af in allfs: 
-    sname = af.split('/')[-3] + af.split('/')[-2]
+    sname = af.split('/')[-4] + af.split('/')[-3] + af.split('/')[-2]
+    #sname = af.split('/')[-3]
     outf = af+'results.txt'
 
     samps = getdist_clean(af)
@@ -32,6 +31,7 @@ for af in allfs:
     g.settings.axes_labelsize=14
     g.settings.line_styles = 'tab10'
     g.triangle_plot([samps], z, shaded=True, title_limit=1)
-    mpl.pyplot.savefig('/mnt/zfsusers/mabitbol/notebooks/data_and_figures/'+sname+'_triangle')
+    mpl.pyplot.savefig(f'/mnt/zfsusers/mabitbol/notebooks/data_and_figures/{sname}_triangle')
+    mpl.pyplot.close()
 
 
