@@ -1,0 +1,17 @@
+modules: bbpower
+launcher: local
+stages:
+    - name: BBCompSep
+      nprocess: 1
+
+inputs:
+    cells_coadded: /mnt/zfsusers/mabitbol/BBHybrid/data/sim02/cls_coadd0.fits
+    cells_fiducial: /mnt/zfsusers/mabitbol/BBHybrid/data/sim02/cls_fid0.fits
+    cells_noise: /mnt/zfsusers/mabitbol/BBHybrid/data/sim02/cls_noise0.fits
+
+resume: False
+config: ./moments/xxx/config.yml
+output_dir: ./moments/xxx/output
+log_dir: ./moments/xxx/output
+pipeline_log: ./moments/xxx/output/log.txt
+

@@ -1,0 +1,52 @@
+global:
+    nside: 256
+    compute_dell: True
+
+BBCompSep:
+    sampler: 'emcee'
+    nwalkers: 128
+    n_iters: 10000
+    likelihood_type: 'chi2'
+    pol_channels: ['B']
+    l_min: 30
+    l_max: 300
+    diff: False
+
+    cmb_model:
+        cmb_templates: ["./examples/data/camb_lens_nobb.dat", 
+                        "./examples/data/camb_lens_r1.dat"]
+        params:
+            r_tensor: ['r_tensor', 'tophat', [-0.1, 0.00, 0.1]]
+            A_lens: ['A_lens', 'tophat', [0.00, 1.0, 2.00]]
+
+    resid_seds: "/mnt/zfsusers/mabitbol/BBHybrid/data/sim0X/hybrid_params0.npz"
+    fg_model:
+        component_1:
+            name: Dust
+            sed: Dust
+            cl:
+                BB: ClPowerLaw
+            sed_parameters:
+                beta_d: ['beta_d', 'Gaussian', [1.60, 0.1]]
+                temp_d: ['temp', 'fixed', [19.6]]
+                nu0_d: ['nu0', 'fixed', [353.]]
+            cl_parameters:
+                BB:
+                   amp_d_bb: ['amp', 'tophat', [0., 1., 10.]]
+                   alpha_d_bb: ['alpha', 'tophat', [-3., -0.5, 1.]]
+                   l0_d_bb: ['ell0', 'fixed', [80.]]
+
+        component_2:
+            name: Synchrotron
+            sed: Synchrotron
+            cl:
+                BB: ClPowerLaw
+            sed_parameters:
+                beta_s: ['beta_pl', 'Gaussian', [-3.0, 0.3]]
+                nu0_s: ['nu0', 'fixed', [23.]]
+            cl_parameters:
+                BB:
+                    amp_s_bb: ['amp', 'tophat', [0., 1., 10.]]
+                    alpha_s_bb: ['alpha', 'tophat', [-3., -0.5, 1.]]
+                    l0_s_bb: ['ell0', 'fixed', [80.]]
+
