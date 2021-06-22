@@ -1,6 +1,6 @@
 #!/bin/bash
 
-mdir="moments/hybrid_masked_10p/"
+mdir="moments/hybrid_masked_alphap/"
 cf=$mdir"config.yml"
 for k in {0..3}
 do
@@ -21,7 +21,7 @@ do
         chain=$output"param_chains.npz"
         configcopy=$output"config_copy.yml"
 
-        addqueue -q cmb -c "4 hours" -m 1 -s -n 1x4 /usr/bin/python3 -m bbpower BBCompSep   --cells_coadded=$coadd   --cells_noise=$noise   --cells_fiducial=$fid   --param_chains=$chain   --config_copy=$configcopy   --config=$config
+        addqueue -q redwood -c "4 hours" -m 1 -s -n 1x1 /usr/bin/python3 -m bbpower BBCompSep   --cells_coadded=$coadd   --cells_noise=$noise   --cells_fiducial=$fid   --param_chains=$chain   --config_copy=$configcopy   --config=$config
     done
 done
 

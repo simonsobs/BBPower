@@ -8,8 +8,8 @@ import matplotlib as mpl
 from getdist import plots, MCSamples
 from labels import alllabels, allranges
 
-npf = 'hybrid_masked_10p'
-allfs = glob.glob(f'/mnt/zfsusers/mabitbol/BBPower/{npf}/sim0*/output*/')
+npf = 'hybrid_masked_alphap'
+allfs = glob.glob(f'/mnt/zfsusers/mabitbol/BBPower/moments/{npf}/sim0*/output*/')
 allfs.sort()
 
 
@@ -47,10 +47,13 @@ def getdist_clean(fdir):
     sampler = np.load(f'{fdir}cleaned_chains.npz')
     vals = [allranges[k] for k in sampler['labels']]
     ranges = dict(zip(sampler['labels'], vals))
+    #gd_samps = MCSamples(samples=sampler['samples'], 
+    #                     names=sampler['labels'], 
+    #                     labels=[p.strip('$') for p in sampler['labels']], 
+    #                     ranges=ranges)
     gd_samps = MCSamples(samples=sampler['samples'], 
                          names=sampler['labels'], 
-                         labels=[p.strip('$') for p in sampler['labels']], 
-                         ranges=ranges)
+                         labels=[p.strip('$') for p in sampler['labels']])
     return gd_samps
 
 for af in allfs: 
