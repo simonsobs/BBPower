@@ -289,13 +289,9 @@ class BBPowerSummarizer(PipelineStage):
                                   weights_total)
 
         # Off-diagonal coadding
-        spectra_xcorr = np.zeros([self.nbands, 2, self.nbands, 2, self.n_bpws])
         triu_mean = np.mean(spectra[np.triu_indices(self.nsplits, 1)], axis=0)
         tril_mean = np.mean(spectra[np.tril_indices(self.nsplits, -1)], axis=0)
-        itr = self.bands_pol_iterator(with_windows=False)
-        for ib1, ip1, ib2, ip2, l1, l2, x, win in itr:
-            # Average over all off-diagonal elements of [nsplits,nsplits]-matrix
-            spectra_xcorr[ib1, ip1, ib2, ip2] += (triu_mean + tril_mean)[ib1, ip1, ib2, ip2]/2.
+        spectra_xcorr = 0.5*(tril_mean+triu_mean)
 
         # Noise power spectra
         spectra_noise = spectra_total - spectra_xcorr
