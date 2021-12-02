@@ -351,17 +351,41 @@ class BBCompSep(PipelineStage):
         """
         Likelihood with priors. 
         """
+        ##prior = self.params.lnprior(par)
+        ##if not np.isfinite(prior):
+        ##    return -np.inf
+        ##
+        ##params = self.params.build_params(par)
+        ##if self.use_handl:
+        ##    dx = self.h_and_l_dx(params)
+        ##else:
+        ##    dx = self.chi_sq_dx(params)
+        ##like = -0.5 * np.einsum('i, ij, j',dx,self.invcov,dx)
+        ##return prior + like
         prior = self.params.lnprior(par)
         if not np.isfinite(prior):
             return -np.inf
 
+        return prior + self.lnlike(par)
+
+    def lnlike(self, par):
+        """
+        Likelihood without priors. 
+        """
         params = self.params.build_params(par)
         if self.use_handl:
             dx = self.h_and_l_dx(params)
+            if np.any(np.isinf(dx)):
+                return -np.inf
         else:
             dx = self.chi_sq_dx(params)
-        like = -0.5 * np.einsum('i, ij, j',dx,self.invcov,dx)
-        return prior + like
+        # invcov = 567, 567
+        # dx = 567
+        #print(self.invcov.shape)
+        #print(dx.shape)
+        like = -0.5 * np.dot(dx, np.dot(self.invcov, dx))
+        return like
+
 
     def emcee_sampler(self):
         """
@@ -404,6 +428,20 @@ class BBCompSep(PipelineStage):
             c2=-2*self.lnprob(par)
             return c2
         res=minimize(chi2, self.params.p0, method="Powell")
+        ## Plot Cls data vs model
+        ##bbdata_cls = self.bbdata # n_bpws, nfreqs, nfreqs
+        ##names=self.params.p_free_names
+        ##parameters = dict(zip(list(names),res.x))
+        ##model_cls = self.model(parameters) # n_bpws, nfreqs, nfreqs
+        ##for i in range(self.nfreqs):
+        ##    for j in range(i, self.nfreqs):
+        ##        import matplotlib.pyplot as plt
+        ##        plt.figure()
+        ##        plt.plot(self.ell_b, bbdata_cls[:,i,j], label='data')
+        ##        plt.plot(self.ell_b, model_cls[:,i,j], label='theory')
+        ##        plt.legend()
+        ##        plt.savefig(f'model_vs_data_{i}_{j}.png',bbox_inches='tight')
+        
         return res.x
 
     def fisher(self):

@@ -266,7 +266,9 @@ class BBPowerSummarizer(PipelineStage):
                                   weights_total)
 
         # Off-diagonal coadding
-        spectra_xcorr = np.mean(spectra[np.triu_indices(self.nsplits,1)],axis=0)
+        triu_mean = np.mean(spectra[np.triu_indices(self.nsplits, 1)], axis=0)
+        tril_mean = np.mean(spectra[np.tril_indices(self.nsplits, -1)], axis=0)
+        spectra_xcorr = 0.5*(tril_mean+triu_mean)
 
         # Noise power spectra
         spectra_noise = spectra_total - spectra_xcorr

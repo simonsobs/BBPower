@@ -8,8 +8,15 @@ import matplotlib as mpl
 from getdist import plots, MCSamples
 from labels import alllabels, allranges
 
-npf = 'hybrid_masked_alphap'
-allfs = glob.glob(f'/mnt/zfsusers/mabitbol/BBPower/moments/{npf}/sim0*/output*/')
+hybrid = 0
+baseline = 1
+
+if hybrid:
+    npf = 'hybrid_masked_alphap'
+    allfs = glob.glob(f'/mnt/zfsusers/susanna/BBPower/test_hybrid/{npf}/sim0*/output*/')
+    #/mnt/zfsusers/susanna/BBHybrid/data/sim00/
+elif baseline:
+    allfs = glob.glob('/mnt/zfsusers/susanna/BBPower/baseline_masked/sim0*/output*/')
 allfs.sort()
 
 
@@ -70,6 +77,9 @@ for af in allfs:
     g.settings.axes_labelsize=14
     g.settings.line_styles = 'tab10'
     g.triangle_plot([samps], z, shaded=True, title_limit=1)
-    mpl.pyplot.savefig(f'/mnt/zfsusers/mabitbol/notebooks/data_and_figures/{sname}_triangle')
+    if hybrid:
+        mpl.pyplot.savefig(f'/mnt/zfsusers/susanna/BBPower/test_hybrid/plots/{sname}_triangle')
+    elif baseline:
+        mpl.pyplot.savefig(f'/mnt/zfsusers/susanna/BBPower/baseline_masked/plots/{sname}_triangle')
     mpl.pyplot.close()
 
