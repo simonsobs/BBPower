@@ -23,7 +23,7 @@
 ##done
 
 mdir="baseline_masked/"
-for k in {0..3}
+for k in 0 #{0..3}
 do
     for j in 0000 #{0000..0020}
     do

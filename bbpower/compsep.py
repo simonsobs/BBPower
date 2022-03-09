@@ -32,12 +32,18 @@ class BBCompSep(PipelineStage):
         self.params = ParameterManager(self.config)
         if self.config.get("diff"):
             self.hybridparams = np.load(self.config['resid_seds'])
+            hyb_params = self.hybridparams['params_cent']
+            hyb_sigma = self.hybridparams['params_sigma']
+            # Beta_s: [centre, sigma]
+            self.params.p_free_priors[6][2] = [hyb_params[0], hyb_sigma[0]]
+            # Beta_d: [centre, sigma]
+            self.params.p_free_priors[2][2] = [hyb_params[1], hyb_sigma[1]]
         if self.use_handl:
             self.prepare_h_and_l()
         return
 
     def matrix_to_vector(self, mat):
-        return mat[..., self.index_ut[0], self.index_ut[1]]
+        return mat[..., self.index_ut_modes[0], self.index_ut_modes[1]]
 
     def vector_to_matrix(self, vec):
         if vec.ndim == 1:
@@ -167,12 +173,47 @@ class BBCompSep(PipelineStage):
                 cv2d[:, ind_vec, :, ind_vecb] = self.s.covariance.covmat[ind_a][:, ind_b]
 
         #Store data
-        self.bbdata = self.vector_to_matrix(v2d)
+        self.bbdata = self.vector_to_matrix(v2d) #(nbpw, nf, nf)
+        if self.config.get("diff"):
+            from scipy.linalg import eig, inv, pinv
+            self.hybridparams = np.load(self.config['resid_seds'])
+            Qmat = self.hybridparams['Q']
+            eval, evec = eig(Qmat)
+            mask = eval > 0.1 #take away rows equivalent to eigenvalue=0
+            self.R = np.linalg.inv(evec)[mask, :]
+            self.bbdata = np.einsum("aj,bk,ijk->iab", self.R, self.R, self.bbdata) 
+            cov_all = np.zeros([self.n_bpws, self.nmaps, self.nmaps, self.n_bpws, self.nmaps, self.nmaps])
+            for ix in range(self.ncross):
+                i, j = np.array(self.index_ut)[:,ix] 
+                for jx in range(self.ncross): 
+                    m, n = np.array(self.index_ut)[:,jx] 
+                    cov_all[:, i, j, :, m, n] = cv2d[:, ix, :, jx]
+                    cov_all[:, j, i, :, m, n] = cv2d[:, ix, :, jx]
+                    cov_all[:, i, j, :, n, m] = cv2d[:, ix, :, jx]
+                    cov_all[:, j, i, :, n, m] = cv2d[:, ix, :, jx]
+            ccov = np.einsum("aj,bk,gm,dn,ijklmn->iablgd", self.R, self.R, self.R, self.R, cov_all)
+            self.nmodes = 4
+            self.nmaps_modes = self.nmodes * self.npol
+            self.index_ut_modes = np.triu_indices(self.nmodes)
+            self.ncross_modes = (self.nmaps_modes * (self.nmaps_modes + 1)) // 2
+            cv2d = np.zeros([self.n_bpws, self.ncross_modes, self.n_bpws, self.ncross_modes])
+            for ix in range(self.ncross_modes):
+                i, j = np.array(self.index_ut_modes)[:,ix]
+                for jx in range(self.ncross_modes): 
+                    m, n = np.array(self.index_ut_modes)[:,jx] 
+                    cv2d[:, ix, :, jx] = ccov[:, i, j, :, m, n]
+        else:
+            self.nmodes = self.nfreqs
+            self.nmaps_modes = self.nmaps
+            self.index_ut_modes = self.index_ut
+            self.ncross_modes = self.ncross
+        self.bbcovar = cv2d.reshape([self.n_bpws * self.ncross_modes, self.n_bpws * self.ncross_modes])
+            
         if self.use_handl:
             self.bbnoise = self.vector_to_matrix(v2d_noi)
             self.bbfiducial = self.vector_to_matrix(v2d_fid)
-        self.bbcovar = cv2d.reshape([self.n_bpws * self.ncross, self.n_bpws * self.ncross])
-        self.invcov = np.linalg.solve(self.bbcovar, np.identity(len(self.bbcovar)))
+        
+        self.invcov = np.linalg.inv(self.bbcovar)
         return
 
     def load_cmb(self):
@@ -210,21 +251,18 @@ class BBCompSep(PipelineStage):
             sed_params = [params[comp['names_sed_dict'][k]] 
                           for k in comp['sed'].params]
             rot_matrices.append([])
-
+            
             if self.config.get("diff"):
                 def sed(nu):
-                    return comp['sed'].diff(nu, *sed_params)
+                    return comp['sed'].diff(nu, *sed_params) 
             else:
                 def sed(nu):
                     return comp['sed'].eval(nu, *sed_params)
-
+            
             for tn in range(self.nfreqs):
                 sed_b, rot = self.bpss[tn].convolve_sed(sed, params)
                 fg_scaling[i_c, tn] = sed_b * units
                 rot_matrices[i_c].append(rot)
-            
-            if self.config.get("diff"):
-                fg_scaling[i_c] = np.dot(self.hybridparams['Q'], fg_scaling[i_c])
 
         return fg_scaling.T, rot_matrices
 
@@ -264,14 +302,14 @@ class BBCompSep(PipelineStage):
                     self.cmb_scal) * self.dl2cl # [npol,npol,nell]
         fg_scaling, rot_m = self.integrate_seds(params)  # [nfreq, ncomp], [ncomp,nfreq,[matrix]]
         fg_cell = self.evaluate_power_spectra(params)  # [ncomp,ncomp,npol,npol,nell]
-
+    
         cls_array_fg = np.zeros([self.nfreqs,self.nfreqs,self.n_ell,self.npol,self.npol])
         fg_cell = np.transpose(fg_cell, axes = [0,1,4,2,3])  # [ncomp,ncomp,nell,npol,npol]
         cmb_cell = np.transpose(cmb_cell, axes = [2,0,1]) # [nell,npol,npol]
         for f1 in range(self.nfreqs):
             for f2 in range(f1,self.nfreqs):
                 cls=cmb_cell.copy()
-
+    
                 for c1 in range(self.fg_model.n_components):
                     mat1=rot_m[c1][f1]
                     a1=fg_scaling[f1,c1]
@@ -295,14 +333,16 @@ class BBCompSep(PipelineStage):
                         cls_array_list[:, f1, p1, f2, p2] = clband
                         if m1!=m2:
                             cls_array_list[:, f2, p2, f1, p1] = clband
-
+    
         for f1 in range(self.nfreqs):
             for f2 in range(self.nfreqs):
                 cls_array_list[:,f1,:,f2,:] = rotate_cells(self.bpss[f2], self.bpss[f1],
                                                            cls_array_list[:,f1,:,f2,:],
                                                            params)
-
-        return cls_array_list.reshape([self.n_bpws, self.nmaps, self.nmaps])
+        cls_array_list = cls_array_list.reshape([self.n_bpws, self.nmaps, self.nmaps])
+        if self.config.get("diff"):
+            cls_array_list = np.einsum("aj,bk,ijk->iab", self.R, self.R, cls_array_list)
+        return cls_array_list
 
     def chi_sq_dx(self, params):
         """
@@ -318,54 +358,51 @@ class BBCompSep(PipelineStage):
         return 
 
     def h_and_l_dx(self, params):
-        """
-        Hamimeche and Lewis likelihood. 
-        Taken from Cobaya written by H, L and Torrado
-        See: https://github.com/CobayaSampler/cobaya/blob/master/cobaya/likelihoods/_cmblikes_prototype/_cmblikes_prototype.py
+        """                                                                                                                                                                           
+        Hamimeche and Lewis likelihood.                                                                                                                                               
+        Taken from Cobaya written by H, L and Torrado                                                                                                                                 
+        See: https://github.com/CobayaSampler/cobaya/blob/master/cobaya/likelihoods/_cmblikes_prototype/_cmblikes_prototype.py                                                        
         """
         model_cls = self.model(params)
         dx_vec = []
         for k in range(model_cls.shape[0]):
             C = model_cls[k] + self.bbnoise[k]
             X = self.h_and_l(C, self.observed_cls[k], self.Cfl_sqrt[k])
+            if np.any(np.isinf(X)):
+                return [np.inf]
             dx = self.matrix_to_vector(X).flatten()
             dx_vec = np.concatenate([dx_vec, dx])
         return dx_vec
-
+    
     def h_and_l(self, C, Chat, Cfl_sqrt):
-        diag, U = np.linalg.eigh(C)
+        try:
+            diag, U = np.linalg.eigh(C)
+        except:
+            return [np.inf]
         rot = U.T.dot(Chat).dot(U)
         roots = np.sqrt(diag)
         for i, root in enumerate(roots):
             rot[i, :] /= root
             rot[:, i] /= root
         U.dot(rot.dot(U.T), rot)
-        diag, rot = np.linalg.eigh(rot)
-        diag = np.sign(diag - 1) * np.sqrt(2 * np.maximum(0, diag - np.log(diag) - 1))
+        try:
+            diag, rot = np.linalg.eigh(rot)
+        except:
+            return [np.inf]
+        diag = (np.sign(diag - 1) *
+                np.sqrt(2 * np.maximum(0, diag - np.log(diag) - 1)))
         Cfl_sqrt.dot(rot, U)
         for i, d in enumerate(diag):
             rot[:, i] = U[:, i] * d
         return rot.dot(U.T)
-
+    
     def lnprob(self, par):
         """
         Likelihood with priors. 
         """
-        ##prior = self.params.lnprior(par)
-        ##if not np.isfinite(prior):
-        ##    return -np.inf
-        ##
-        ##params = self.params.build_params(par)
-        ##if self.use_handl:
-        ##    dx = self.h_and_l_dx(params)
-        ##else:
-        ##    dx = self.chi_sq_dx(params)
-        ##like = -0.5 * np.einsum('i, ij, j',dx,self.invcov,dx)
-        ##return prior + like
         prior = self.params.lnprior(par)
         if not np.isfinite(prior):
             return -np.inf
-
         return prior + self.lnlike(par)
 
     def lnlike(self, par):
@@ -379,13 +416,8 @@ class BBCompSep(PipelineStage):
                 return -np.inf
         else:
             dx = self.chi_sq_dx(params)
-        # invcov = 567, 567
-        # dx = 567
-        #print(self.invcov.shape)
-        #print(dx.shape)
         like = -0.5 * np.dot(dx, np.dot(self.invcov, dx))
         return like
-
 
     def emcee_sampler(self):
         """
@@ -428,20 +460,6 @@ class BBCompSep(PipelineStage):
             c2=-2*self.lnprob(par)
             return c2
         res=minimize(chi2, self.params.p0, method="Powell")
-        ## Plot Cls data vs model
-        ##bbdata_cls = self.bbdata # n_bpws, nfreqs, nfreqs
-        ##names=self.params.p_free_names
-        ##parameters = dict(zip(list(names),res.x))
-        ##model_cls = self.model(parameters) # n_bpws, nfreqs, nfreqs
-        ##for i in range(self.nfreqs):
-        ##    for j in range(i, self.nfreqs):
-        ##        import matplotlib.pyplot as plt
-        ##        plt.figure()
-        ##        plt.plot(self.ell_b, bbdata_cls[:,i,j], label='data')
-        ##        plt.plot(self.ell_b, model_cls[:,i,j], label='theory')
-        ##        plt.legend()
-        ##        plt.savefig(f'model_vs_data_{i}_{j}.png',bbox_inches='tight')
-        
         return res.x
 
     def fisher(self):

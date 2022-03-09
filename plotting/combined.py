@@ -8,13 +8,15 @@ import matplotlib as mpl
 from getdist import plots, MCSamples
 from labels import alllabels, allranges
 
-hybrid = 0
-baseline = 1
+hybrid = 1
+baseline = 0
 
 if hybrid:
-    npf = 'hybrid_masked_alphap'
-    allfs = glob.glob(f'/mnt/zfsusers/susanna/BBPower/test_hybrid/{npf}/sim0*/output*/')
-    #/mnt/zfsusers/susanna/BBHybrid/data/sim00/
+    #npf = 'hybrid_masked_alphap'
+    #allfs = glob.glob(f'/mnt/zfsusers/susanna/BBPower/test_hybrid/{npf}/sim0*/output*/')
+    npf = 'hybrid_masked_outs'
+    #allfs = glob.glob(f'/mnt/extraspace/susanna/BBHybrid/{npf}/gaussian_priorsfromBfore/sim0*/output*/')
+    allfs = glob.glob(f'/mnt/extraspace/susanna/BBHybrid/{npf}/realistic/d1s1/output000_pinv/')
 elif baseline:
     allfs = glob.glob('/mnt/zfsusers/susanna/BBPower/baseline_masked/sim0*/output*/')
 allfs.sort()
@@ -78,7 +80,9 @@ for af in allfs:
     g.settings.line_styles = 'tab10'
     g.triangle_plot([samps], z, shaded=True, title_limit=1)
     if hybrid:
-        mpl.pyplot.savefig(f'/mnt/zfsusers/susanna/BBPower/test_hybrid/plots/{sname}_triangle')
+        #mpl.pyplot.savefig(f'/mnt/zfsusers/susanna/BBPower/test_hybrid/plots/{sname}_triangle')
+        #mpl.pyplot.savefig(f'/mnt/zfsusers/susanna/BBPower/plotting/{sname}_triangle_betasB4')
+        mpl.pyplot.savefig(f'/mnt/zfsusers/susanna/BBPower/plotting/{sname}_triangle_d1s1pinv')
     elif baseline:
         mpl.pyplot.savefig(f'/mnt/zfsusers/susanna/BBPower/baseline_masked/plots/{sname}_triangle')
     mpl.pyplot.close()

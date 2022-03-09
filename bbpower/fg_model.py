@@ -85,6 +85,16 @@ class FGModel:
                             val = None
                         params_fgl[k][l[0]]=val
 
+            ###Added------------------------------------------------------------------------
+            ### Moment parameters
+            ##comp['names_moments_dict'] = {}
+            ##d = component.get('moments')
+            ##if d and config['fg_model'].get('use_moments'):
+            ##    comp['moments_pameters'] = component['moments']
+            ##    for k, l in component['moments'].items():
+            ##        comp['names_moments_dict'][l[0]] = k
+            ###------------------------------------------------------------------------
+
             # Set Cl functions
             comp['cl'] = {}
             for k,c in component['cl'].items():
