@@ -9,7 +9,7 @@ class BBPowerSummarizer(PipelineStage):
     inputs = [('splits_list', TextFile), ('bandpasses_list', TextFile),
               ('cells_all_splits', FitsFile), ('cells_all_sims', TextFile)]
     outputs = [('cells_coadded_total', FitsFile), ('cells_coadded', FitsFile),
-               ('cells_noise', FitsFile), ('cells_null', FitsFile)]
+               ('cells_noise', FitsFile), ('cells_null', FitsFile), ('cells_fiducial', FitsFile)]
     config_options = {'nulls_covar_type': 'diagonal',
                       'nulls_covar_diag_order': 0,
                       'data_covar_type': 'block_diagonal',
@@ -180,7 +180,7 @@ class BBPowerSummarizer(PipelineStage):
                                              quantity='cmb_polarization',
                                              bandpass_extra={'dnu': t.bandpass_extra['dnu']})
                     tracers_bands[band] = T
-            elif tn == 'temp':
+            else:
                 T = sacc.BaseTracer.make('Map', band,
                                          2, t.ell, t.beam,
                                          quantity='cmb_polarization')
@@ -497,22 +497,11 @@ class BBPowerSummarizer(PipelineStage):
                                        window=win)
             ret['saccs'] = [s_total, s_xcorr, s_noise, s_nulls]
         
-        BxB_spectra_total = BxB_spectra_total.reshape([2*self.nbands, 2*self.nbands, self.n_bpws])
-        BxTemp_spectra_total = BxTemp_spectra_total([2*self.nbands, 2, self.n_bpws])
-        TempxB_spectra_total = np.transpose(BxTemp_spectra_total, axes=[1,0,2])
-        
-        BxB_spectra_xcorr = BxB_spectra_xcorr.reshape([2*self.nbands, 2*self.nbands, self.n_bpws])
-        BxTemp_spectra_xcorr = BxTemp_spectra_xcorr([2*self.nbands, 2, self.n_bpws])
-        TempxB_spectra_xcorr = np.transpose(BxTemp_spectra_xcorr, axes=[1,0,2])
-
-        BxB_spectra_noise = BxB_spectra_noise.reshape([2*self.nbands, 2*self.nbands, self.n_bpws])
-        BxTemp_spectra_noise = BxTemp_spectra_noise([2*self.nbands, 2, self.n_bpws])
-        TempxB_spectra_noise = np.transpose(BxTemp_spectra_noise, axes=[1,0,2])
-
-        spectra_total = np.block([[BxB_spectra_total, BxTemp_spectra_total],[TempxB_spectra_total, TempxTemp_spectra_total]])[np.triu_indices(2*(self.nbands+1))].flatten()
-        spectra_xcorr = np.block([[BxB_spectra_xcorr, BxTemp_spectra_xcorr],[TempxB_spectra_xcorr, TempxTemp_spectra_xcorr]])[np.triu_indices(2*(self.nbands+1))].flatten()
-        spectra_noise = np.block([[BxB_spectra_noise, BxTemp_spectra_noise],[TempxB_spectra_noise, TempxTemp_spectra_noise]])[np.triu_indices(2*(self.nbands+1))].flatten()
+        spectra_total = s_total.mean.copy()
+        spectra_xcorr = s_xcorr.mean.copy()
+        spectra_noise = s_noise.mean.copy()
         spectra_nulls = spectra_nulls.reshape([-1, self.n_bpws]).flatten()
+        
         ret['spectra'] = [spectra_total, spectra_xcorr, spectra_noise, spectra_nulls]
 
         return ret
@@ -553,6 +542,8 @@ class BBPowerSummarizer(PipelineStage):
             sim_cd_n[i, :] = sb['spectra'][2]
             sim_null[i, :] = sb['spectra'][3]
 
+        sim_spectra_mean = np.mean(sim_cd_x,axis=0) # Average off-diagonal coadded spectra over all sims
+        
         # Compute covariance
         print("Covariances")
         dctyp = self.config['data_covar_type']
@@ -584,6 +575,9 @@ class BBPowerSummarizer(PipelineStage):
         summ['saccs'][3].save_fits(self.get_output("cells_null"),
                                    overwrite=True)
 
+        summ['saccs'][1].mean = sim_spectra_mean # Quick way of saving fiducial Cls
+        summ['saccs'][1].save_fits(self.get_output("cells_fiducial"),
+                                   overwrite=True)
 
 if __name__ == '__main_':
     cls = PipelineStage.main()

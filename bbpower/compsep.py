@@ -36,6 +36,7 @@ class BBCompSep(PipelineStage):
         if self.config['fg_model'].get('use_moments'):
             self.precompute_w3j()
         self.load_cmb()
+        self.load_template_model()
         self.fg_model = FGModel(self.config)
         self.params = ParameterManager(self.config)
         if self.use_handl:
@@ -114,7 +115,7 @@ class BBCompSep(PipelineStage):
         # Read data
         self.s = sacc.Sacc.load_fits(self.get_input('cells_coadded'))
         if self.use_handl:
-            s_fid = sacc.Sacc.load_fits(self.get_input('cells_fiducial')) # At this stage cells_fiducial is an external input. Should it be calculated as average of sims in stage 2?
+            s_fid = sacc.Sacc.load_fits(self.get_input('cells_fiducial'))
             s_noi = sacc.Sacc.load_fits(self.get_input('cells_noise'))
 
         # Keep only desired correlations
@@ -157,15 +158,16 @@ class BBCompSep(PipelineStage):
         # Collect bandpasses
         self.bpss = []
         for i_t, tn in enumerate(tr_names):
-            if tn != 'temp':
-                t = self.s.tracers[tn]
-                nu = t.nu
-                dnu = np.zeros_like(nu)
-                dnu[1:-1] = 0.5 * (nu[2:] - nu[:-2])
-                dnu[0] = nu[1] - nu[0]
-                dnu[-1] = nu[-1] - nu[-2]
-                bnu = t.bandpass
-                self.bpss.append(Bandpass(nu, dnu, bnu, i_t+1, self.config))
+            if tn == 'temp':
+                continue
+            t = self.s.tracers[tn]
+            nu = t.nu
+            dnu = np.zeros_like(nu)
+            dnu[1:-1] = 0.5 * (nu[2:] - nu[:-2])
+            dnu[0] = nu[1] - nu[0]
+            dnu[-1] = nu[-1] - nu[-2]
+            bnu = t.bandpass
+            self.bpss.append(Bandpass(nu, dnu, bnu, i_t+1, self.config))
 
         # Get ell sampling
         # Example power spectrum (this gives the binned ells)
@@ -262,6 +264,23 @@ class BBCompSep(PipelineStage):
             self.cmb_scal[ind, ind] = cmb_lensingfile[:, 2][mask]
         return
 
+    def load_template_model(self):
+
+        # Loads analytical template spectra: EE, EB and BE = 0, BB given by eq. (29) of arXiv:2110.09730
+
+        self.analytic_TempxTemp = np.zeros([self.n_ell, self.npol, self.npol])
+        temp_file = np.loadtxt(self.get_input('analytic_temp_BB'))
+        temp_ells = temp_file[:,0]
+        mask = (temp_ells <= self.bpw_l.max()) & (temp_ells > 1)
+        temp_ells = temp_ells[mask]
+        temp_BB = temp_file[:,1][mask]
+
+        if 'B' in self.config['pol_channels']:
+            ind = self.pol_order['B']
+            self.analytic_TempxTemp[:, ind, ind] = temp_BB
+
+        return
+
     def integrate_seds(self, params):
         single_sed = np.zeros([self.fg_model.n_components,
                                self.nfreqs])
@@ -350,16 +369,6 @@ class BBCompSep(PipelineStage):
             bmat = np.array([[c, s],
                              [-s, c]])
             cmb_cell = rotate_cells_mat(bmat, bmat, cmb_cell)
-
-        self.analytic_TempxTemp = np.zeros([self.n_ell, self.npol, self.npol])
-        temp_file = np.loadtxt(self.get_input('analytic_temp_BB'))
-        temp_ells = temp_file[:,0]
-        mask = (temp_ells <= self.bpw_l.max()) & (temp_ells > 1)
-        temp_ells = temp_ells[mask]
-        temp_BB = temp_file[:,1][mask]
-        if 'B' in self.config['pol_channels']:
-            ind = self.pol_order['B']
-            self.analytic_TempxTemp[:, ind, ind] = temp_BB
 
         # [ncomp, ncomp, nfreq, nfreq], [ncomp, nfreq,[matrix]]
         fg_scaling, rot_m = self.integrate_seds(params)
