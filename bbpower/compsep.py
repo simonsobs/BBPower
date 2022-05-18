@@ -3,7 +3,7 @@ import os
 from scipy.linalg import sqrtm
 
 from bbpipe import PipelineStage
-from .types import NpzFile, FitsFile, YamlFile
+from .types import NpzFile, FitsFile, YamlFile, TextFile
 from .fg_model import FGModel
 from .param_manager import ParameterManager
 from .bandpasses import (Bandpass, rotate_cells, rotate_cells_mat,
@@ -20,7 +20,8 @@ class BBCompSep(PipelineStage):
     name = "BBCompSep"
     inputs = [('cells_coadded', FitsFile),
               ('cells_noise', FitsFile),
-              ('cells_fiducial', FitsFile)]
+              ('cells_fiducial', FitsFile),
+              ('analytic_temp_BB', TextFile)]
     outputs = [('param_chains', NpzFile),
                ('config_copy', YamlFile)]
     config_options = {'likelihood_type': 'h&l', 'n_iters': 32,
@@ -89,10 +90,10 @@ class BBCompSep(PipelineStage):
 
     def _freq_pol_iterator(self):
         icl = -1
-        for b1 in range(self.nfreqs):
+        for b1 in range(self.n_channels):
             for p1 in range(self.npol):
                 m1 = p1 + self.npol * b1
-                for b2 in range(b1, self.nfreqs):
+                for b2 in range(b1, self.n_channels):
                     if b1 == b2:
                         p2_r = range(p1, self.npol)
                     else:
@@ -113,7 +114,7 @@ class BBCompSep(PipelineStage):
         # Read data
         self.s = sacc.Sacc.load_fits(self.get_input('cells_coadded'))
         if self.use_handl:
-            s_fid = sacc.Sacc.load_fits(self.get_input('cells_fiducial'))
+            s_fid = sacc.Sacc.load_fits(self.get_input('cells_fiducial')) # At this stage cells_fiducial is an external input. Should it be calculated as average of sims in stage 2?
             s_noi = sacc.Sacc.load_fits(self.get_input('cells_noise'))
 
         # Keep only desired correlations
@@ -144,9 +145,11 @@ class BBCompSep(PipelineStage):
             tr_names = sorted(list(self.s.tracers.keys()))
         else:
             tr_names = self.config['bands']
-        self.nfreqs = len(tr_names)
+            tr_names.append('temp')
+        self.n_channels = len(tr_names)
+        self.nfreqs = self.n_channels-1
         self.npol = len(self.pols)
-        self.nmaps = self.nfreqs * self.npol
+        self.nmaps = self.n_channels * self.npol
         self.index_ut = np.triu_indices(self.nmaps)
         self.ncross = (self.nmaps * (self.nmaps + 1)) // 2
         self.pol_order = dict(zip(self.pols, range(self.npol)))
@@ -154,23 +157,24 @@ class BBCompSep(PipelineStage):
         # Collect bandpasses
         self.bpss = []
         for i_t, tn in enumerate(tr_names):
-            t = self.s.tracers[tn]
-            nu = t.nu
-            dnu = np.zeros_like(nu)
-            dnu[1:-1] = 0.5 * (nu[2:] - nu[:-2])
-            dnu[0] = nu[1] - nu[0]
-            dnu[-1] = nu[-1] - nu[-2]
-            bnu = t.bandpass
-            self.bpss.append(Bandpass(nu, dnu, bnu, i_t+1, self.config))
+            if tn != 'temp':
+                t = self.s.tracers[tn]
+                nu = t.nu
+                dnu = np.zeros_like(nu)
+                dnu[1:-1] = 0.5 * (nu[2:] - nu[:-2])
+                dnu[0] = nu[1] - nu[0]
+                dnu[-1] = nu[-1] - nu[-2]
+                bnu = t.bandpass
+                self.bpss.append(Bandpass(nu, dnu, bnu, i_t+1, self.config))
 
         # Get ell sampling
-        # Example power spectrum
+        # Example power spectrum (this gives the binned ells)
         self.ell_b, _ = self.s.get_ell_cl('cl_' + 2 * self.pols[0].lower(),
                                           tr_names[0], tr_names[0])
         # Avoid l<2
         win0 = self.s.data[0]['window']
         mask_w = win0.values > 1
-        self.bpw_l = win0.values[mask_w]
+        self.bpw_l = win0.values[mask_w] # Unbinned ells
         self.n_ell = len(self.bpw_l)
         self.n_bpws = len(self.ell_b)
         # D_ell factor
@@ -346,7 +350,17 @@ class BBCompSep(PipelineStage):
             bmat = np.array([[c, s],
                              [-s, c]])
             cmb_cell = rotate_cells_mat(bmat, bmat, cmb_cell)
-        
+
+        self.analytic_TempxTemp = np.zeros([self.n_ell, self.npol, self.npol])
+        temp_file = np.loadtxt(self.get_input('analytic_temp_BB'))
+        temp_ells = temp_file[:,0]
+        mask = (temp_ells <= self.bpw_l.max()) & (temp_ells > 1)
+        temp_ells = temp_ells[mask]
+        temp_BB = temp_file[:,1][mask]
+        if 'B' in self.config['pol_channels']:
+            ind = self.pol_order['B']
+            self.analytic_TempxTemp[:, ind, ind] = temp_BB
+
         # [ncomp, ncomp, nfreq, nfreq], [ncomp, nfreq,[matrix]]
         fg_scaling, rot_m = self.integrate_seds(params)
         # [ncomp,npol,npol,nell]
@@ -445,32 +459,52 @@ class BBCompSep(PipelineStage):
                     cls_array_fg[f1, f2] += cls
 
         # Window convolution
-        cls_array_list = np.zeros([self.n_bpws, self.nfreqs,
+        cls_BxB_list = np.zeros([self.n_bpws, self.nfreqs,
                                    self.npol, self.nfreqs,
                                    self.npol])
-        for f1 in range(self.nfreqs):
+        cls_BxTemp_list = np.zeros([self.n_bpws, self.nfreqs, self.npol, self.npol])
+        cls_TempxTemp_list = np.zeros([self.n_bpws, self.npol, self.npol])
+
+        for f1 in range(self.n_channels):
             for p1 in range(self.npol):
                 m1 = f1*self.npol+p1
-                for f2 in range(f1, self.nfreqs):
+                for f2 in range(f1, self.n_channels):
                     p0 = p1 if f1 == f2 else 0
                     for p2 in range(p0, self.npol):
                         m2 = f2*self.npol+p2
                         windows = self.windows[self.vector_indices[m1, m2]]
-                        clband = np.dot(windows, cls_array_fg[f1, f2, :,
-                                                              p1, p2])
-                        cls_array_list[:, f1, p1, f2, p2] = clband
-                        if m1 != m2:
-                            cls_array_list[:, f2, p2, f1, p1] = clband
+                        
+                        if f1 != self.n_channels-1 and f2 != self.n_channels-1:
+                            clband = np.dot(windows, cls_array_fg[f1, f2, :,
+                                                                  p1, p2])
+                            cls_BxB_list[:, f1, p1, f2, p2] = clband
+                            if m1 != m2:
+                                cls_BxB_list[:, f2, p2, f1, p1] = clband
+                        
+                        elif f1 != self.n_channels-1 and f2 == self.n_channels-1: # Analytically, template & B-modes cross-spectrum is the same as template auto-spectrum, doesn't depend on f
+                            clband = np.dot(windows, analytic_TempxTemp[:,p1,p2])
+                            cls_BxTemp_list[:,f1,p1,p2] = clband
+
+                        elif f1 == self.n_channels-1 and f2 == self.n_channels-1:
+                            clband = np.dot(windows, analytic_TempxTemp[:,p1,p2])
+                            cls_TempxTemp_list[:,p1,p2] = clband
+                            if p1 != p2:
+                                cls_TempxTemp_list[:,p2,p1] = clband
+
 
         # Polarization angle rotation
         for f1 in range(self.nfreqs):
             for f2 in range(self.nfreqs):
-                cls_array_list[:, f1, :, f2, :] = rotate_cells(self.bpss[f2],
+                cls_BxB_list[:, f1, :, f2, :] = rotate_cells(self.bpss[f2],
                                                                self.bpss[f1],
-                                                               cls_array_list[:, f1, :, f2, :],
+                                                               cls_BxB_list[:, f1, :, f2, :],
                                                                params)
 
-        return cls_array_list.reshape([self.n_bpws, self.nmaps, self.nmaps])
+        cls_BxB_list.reshape([self.n_bpws, self.npol*self.nfreqs, self.npol*self.nfreqs])
+        cls_BxTemp_list.reshape([self.n_bpws, self.npol*self.nfreqs, self.npol])
+        cls_TempxB_list = np.transpose(cls_BxTemp_list, axes=[0,2,1])
+
+        return np.block([[cls_BxB_list, cls_BxTemp_list], [cls_TempxB_list, cls_TempxTemp_list]])
 
     def bcls(self, lmax, gamma, amp):
         ls = np.arange(lmax)

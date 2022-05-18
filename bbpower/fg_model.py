@@ -1,5 +1,5 @@
 import fgbuster.component_model as fgc
-import bbpower.fgcls as fgl
+import bbpower_temp.fgcls as fgl
 
 
 class FGModel:
