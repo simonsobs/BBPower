@@ -611,7 +611,7 @@ class BBCompSep(PipelineStage):
         import emcee
         from multiprocessing import Pool
 
-        fname_temp = self.get_output('param_chains')+'.h5'
+        fname_temp = '/'.join(self.get_output('param_chains').split('/')[:-1])+'/emcee.npz.h5'
 
         backend = emcee.backends.HDFBackend(fname_temp)
 
@@ -742,6 +742,42 @@ class BBCompSep(PipelineStage):
         end = time.time()
 
         return end-start, (end-start)/n_eval
+    
+    def predicted_spectra(self):
+        """
+        Evaluates model at a single point (the MAP value read 
+        from pch.stats or the param_chains.npz) and writes 
+        predicted spectra into a numpy array with shape 
+        (nbpws, nmaps, nmaps).
+        """
+        emcee_path = '/'.join(self.get_output('param_chains').split('/')[:-1])+'/emcee.npz'
+        pch_path = self.get_output('param_chains')[:-4]+'/pch.stats'
+        par_names = self.params.p_free_names
+        map_params = np.zeros((len(par_names)))
+        # This assumes the PolyChord or emcee output parameters
+        # are the same as in self.params. TODO: check?
+        if os.path.isfile(pch_path):
+            for ip, p in enumerate(par_names):
+                with open(pch_path) as f:
+                    for line in f:
+                        if line.startswith("Dim No."):
+                            break
+                    for ipar in range(len(par_names)):
+                        l = f.readline() 
+                        if ipar == ip:
+                            map_params[ip] = float(l.split()[1])
+        elif os.path.isfile(emcee_path):
+            chain = np.load(emcee_path)['chain']
+            for ip, p in enumerate(par_names):
+                map_params[ip] = np.mean(chain[:,:,ip].flatten())
+        else:
+            raise ImportError('No PolyChord or emcee output found')
+        
+        model_cls = self.model(self.params.build_params(map_params))
+        np.save('/'.join(self.get_output('param_chains').split('/')[:-1])+'/cells_model.npy',
+                model_cls)
+        
+        return
 
     def run(self):
         from shutil import copyfile
@@ -749,7 +785,7 @@ class BBCompSep(PipelineStage):
         self.setup_compsep()
         if self.config.get('sampler') == 'emcee':
             sampler = self.emcee_sampler()
-            np.savez(self.get_output('param_chains'),
+            np.savez('/'.join(self.get_output('param_chains').split('/')[:-1])+'/emcee',
                      chain=sampler.chain,
                      names=self.params.p_free_names)
             print("Finished sampling")
@@ -761,13 +797,13 @@ class BBCompSep(PipelineStage):
             cov = np.linalg.inv(fisher)
             for i, (n, p) in enumerate(zip(self.params.p_free_names, p0)):
                 print(n+" = %.3lE +- %.3lE" % (p, np.sqrt(cov[i, i])))
-            np.savez(self.get_output('param_chains'),
+            np.savez('/'.join(self.get_output('param_chains').split('/')[:-1])+'/fisher',
                      params=p0, fisher=fisher,
                      names=self.params.p_free_names)
         elif self.config.get('sampler') == 'maximum_likelihood':
             sampler = self.minimizer()
             chi2 = -2*self.lnprob(sampler)
-            np.savez(self.get_output('param_chains'),
+            np.savez('/'.join(self.get_output('param_chains').split('/')[:-1])+'/max_like',
                      params=sampler,
                      names=self.params.p_free_names,
                      chi2=chi2, ndof=len(self.bbcovar))
@@ -777,17 +813,20 @@ class BBCompSep(PipelineStage):
             print("Chi2: %.3lE" % chi2)
         elif self.config.get('sampler') == 'single_point':
             sampler = self.singlepoint()
-            np.savez(self.get_output('param_chains'),
+            np.savez('/'.join(self.get_output('param_chains').split('/')[:-1])+'/single_point',
                      chi2=sampler, ndof=len(self.bbcovar),
                      names=self.params.p_free_names)
             print("Chi^2:", sampler, len(self.bbcovar))
         elif self.config.get('sampler') == 'timing':
             sampler = self.timing()
-            np.savez(self.get_output('param_chains'),
+            np.savez('/'.join(self.get_output('param_chains').split('/')[:-1])+'/timing',
                      timing=sampler[1],
                      names=self.params.p_free_names)
             print("Total time:", sampler[0])
             print("Time per eval:", sampler[1])
+        elif self.config.get('sampler')=='predicted_spectra':
+            sampler = self.predicted_spectra()
+            print("Predicted spectra saved")
         else:
             raise ValueError("Unknown sampler")
 
