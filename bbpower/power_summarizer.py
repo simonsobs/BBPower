@@ -181,7 +181,7 @@ class BBPowerSummarizer(PipelineStage):
                                              bandpass_extra={'dnu': t.bandpass_extra['dnu']})
                     tracers_bands[band] = T
             else:
-                T = sacc.BaseTracer.make('Map', band,
+                T = sacc.BaseTracer.make('Map', tn,
                                          2, t.ell, t.beam,
                                          quantity='cmb_polarization')
                 tracer_temp = T
@@ -366,7 +366,7 @@ class BBPowerSummarizer(PipelineStage):
                 self.TempxTemp_inds[m2, m1, :] = ind
         self.TempxTemp_inds = self.TempxTemp_inds.flatten()
 
-    def parse_splits_sacc_file(self, s, get_saccs=False, with_windows=False):
+    def parse_splits_sacc_file(self, s, get_saccs=True, with_windows=False):
         """
         Transform a SACC file containing splits into 4 SACC vectors:
         1 that contains the coadded power spectra.
@@ -497,6 +497,7 @@ class BBPowerSummarizer(PipelineStage):
                                        window=win)
             ret['saccs'] = [s_total, s_xcorr, s_noise, s_nulls]
         
+        # If we use this to order the spectra correctly, the function only works if get_saccs = True => changing default to True for now.
         spectra_total = s_total.mean.copy()
         spectra_xcorr = s_xcorr.mean.copy()
         spectra_noise = s_noise.mean.copy()

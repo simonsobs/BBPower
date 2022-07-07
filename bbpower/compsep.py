@@ -357,8 +357,9 @@ class BBCompSep(PipelineStage):
         the bandpasses and windows.
         """
         # [npol,npol,nell]
+        # Removing params['A_lens'] multiplying self.cmb_lens for now. In the future consider adding 2 params capturing uncertainites in BxTemp and TempxTemp spectra
         cmb_cell = (params['r_tensor'] * self.cmb_tens +
-                    params['A_lens'] * self.cmb_lens +
+                    self.cmb_lens +
                     self.cmb_scal) * self.dl2cl
         # [nell,npol,npol]
         cmb_cell = np.transpose(cmb_cell, axes=[2, 0, 1])
@@ -473,7 +474,7 @@ class BBCompSep(PipelineStage):
                                    self.npol])
         cls_BxTemp_list = np.zeros([self.n_bpws, self.nfreqs, self.npol, self.npol])
         cls_TempxTemp_list = np.zeros([self.n_bpws, self.npol, self.npol])
-
+        
         for f1 in range(self.n_channels):
             for p1 in range(self.npol):
                 m1 = f1*self.npol+p1
@@ -491,11 +492,11 @@ class BBCompSep(PipelineStage):
                                 cls_BxB_list[:, f2, p2, f1, p1] = clband
                         
                         elif f1 != self.n_channels-1 and f2 == self.n_channels-1: # Analytically, template & B-modes cross-spectrum is the same as template auto-spectrum, doesn't depend on f
-                            clband = np.dot(windows, analytic_TempxTemp[:,p1,p2])
+                            clband = np.dot(windows, self.analytic_TempxTemp[:,p1,p2])
                             cls_BxTemp_list[:,f1,p1,p2] = clband
 
                         elif f1 == self.n_channels-1 and f2 == self.n_channels-1:
-                            clband = np.dot(windows, analytic_TempxTemp[:,p1,p2])
+                            clband = np.dot(windows, self.analytic_TempxTemp[:,p1,p2])
                             cls_TempxTemp_list[:,p1,p2] = clband
                             if p1 != p2:
                                 cls_TempxTemp_list[:,p2,p1] = clband
@@ -509,8 +510,8 @@ class BBCompSep(PipelineStage):
                                                                cls_BxB_list[:, f1, :, f2, :],
                                                                params)
 
-        cls_BxB_list.reshape([self.n_bpws, self.npol*self.nfreqs, self.npol*self.nfreqs])
-        cls_BxTemp_list.reshape([self.n_bpws, self.npol*self.nfreqs, self.npol])
+        cls_BxB_list = cls_BxB_list.reshape([self.n_bpws, self.npol*self.nfreqs, self.npol*self.nfreqs])
+        cls_BxTemp_list = cls_BxTemp_list.reshape([self.n_bpws, self.npol*self.nfreqs, self.npol])
         cls_TempxB_list = np.transpose(cls_BxTemp_list, axes=[0,2,1])
 
         return np.block([[cls_BxB_list, cls_BxTemp_list], [cls_TempxB_list, cls_TempxTemp_list]])
