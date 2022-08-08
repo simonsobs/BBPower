@@ -277,7 +277,7 @@ class BBCompSep(PipelineStage):
 
         if 'B' in self.config['pol_channels']:
             ind = self.pol_order['B']
-            self.analytic_TempxTemp[:, ind, ind] = temp_BB
+            self.analytic_TempxTemp[:, ind, ind] = temp_BB * self.dl2cl
 
         return
 
@@ -468,53 +468,35 @@ class BBCompSep(PipelineStage):
                                       fg_scaling[c1, c1, f1, f1]) * cls_02[c1]
                     cls_array_fg[f1, f2] += cls
 
-        # Window convolution
-        cls_BxB_list = np.zeros([self.n_bpws, self.nfreqs,
-                                   self.npol, self.nfreqs,
-                                   self.npol])
-        cls_BxTemp_list = np.zeros([self.n_bpws, self.nfreqs, self.npol, self.npol])
-        cls_TempxTemp_list = np.zeros([self.n_bpws, self.npol, self.npol])
-        
-        for f1 in range(self.n_channels):
-            for p1 in range(self.npol):
-                m1 = f1*self.npol+p1
-                for f2 in range(f1, self.n_channels):
-                    p0 = p1 if f1 == f2 else 0
-                    for p2 in range(p0, self.npol):
-                        m2 = f2*self.npol+p2
-                        windows = self.windows[self.vector_indices[m1, m2]]
+        # Window convolution, polarization angle rotation (for BB spectra only) and model spectra
+        model_vec = np.zeros([self.n_bpws, self.ncross])
+
+        itr1 = self._freq_pol_iterator()
+        for b1, b2, p1, p2, m1, m2, ind_vec in itr1:
+            windows = self.windows[self.vector_indices[m1, m2]]
+            
+            if b1 != self.n_channels-1 and b2 != self.n_channels-1:
+                clband = np.dot(windows, cls_array_fg[b1, b2, :, p1, p2])
+            
+            elif b1 != self.n_channels-1 and b2 == self.n_channels-1: # Analytically, template & B-modes cross-spectrum is the same as template auto-spectrum, doesn't depend on f
+                clband = np.dot(windows, self.analytic_TempxTemp[:,p1,p2])
+
+            elif b1 == self.n_channels-1 and b2 == self.n_channels-1:
+                clband = np.dot(windows, self.analytic_TempxTemp[:,p1,p2])
+
+            model_vec[:, ind_vec] = clband
+
+        model_spectra = self.vector_to_matrix(model_vec)
                         
-                        if f1 != self.n_channels-1 and f2 != self.n_channels-1:
-                            clband = np.dot(windows, cls_array_fg[f1, f2, :,
-                                                                  p1, p2])
-                            cls_BxB_list[:, f1, p1, f2, p2] = clband
-                            if m1 != m2:
-                                cls_BxB_list[:, f2, p2, f1, p1] = clband
-                        
-                        elif f1 != self.n_channels-1 and f2 == self.n_channels-1: # Analytically, template & B-modes cross-spectrum is the same as template auto-spectrum, doesn't depend on f
-                            clband = np.dot(windows, self.analytic_TempxTemp[:,p1,p2])
-                            cls_BxTemp_list[:,f1,p1,p2] = clband
+        # Polarization angle rotation (ignore for now as do_angle is False in config)
+        #for f1 in range(self.nfreqs):
+            #for f2 in range(self.nfreqs):
+                #cls_BxB_list[:, f1, :, f2, :] = rotate_cells(self.bpss[f2],
+                                                               #self.bpss[f1],
+                                                               #cls_BxB_list[:, f1, :, f2, :],
+                                                               #params)
 
-                        elif f1 == self.n_channels-1 and f2 == self.n_channels-1:
-                            clband = np.dot(windows, self.analytic_TempxTemp[:,p1,p2])
-                            cls_TempxTemp_list[:,p1,p2] = clband
-                            if p1 != p2:
-                                cls_TempxTemp_list[:,p2,p1] = clband
-
-
-        # Polarization angle rotation
-        for f1 in range(self.nfreqs):
-            for f2 in range(self.nfreqs):
-                cls_BxB_list[:, f1, :, f2, :] = rotate_cells(self.bpss[f2],
-                                                               self.bpss[f1],
-                                                               cls_BxB_list[:, f1, :, f2, :],
-                                                               params)
-
-        cls_BxB_list = cls_BxB_list.reshape([self.n_bpws, self.npol*self.nfreqs, self.npol*self.nfreqs])
-        cls_BxTemp_list = cls_BxTemp_list.reshape([self.n_bpws, self.npol*self.nfreqs, self.npol])
-        cls_TempxB_list = np.transpose(cls_BxTemp_list, axes=[0,2,1])
-
-        return np.block([[cls_BxB_list, cls_BxTemp_list], [cls_TempxB_list, cls_TempxTemp_list]])
+        return model_spectra
 
     def bcls(self, lmax, gamma, amp):
         ls = np.arange(lmax)
@@ -815,6 +797,8 @@ class BBCompSep(PipelineStage):
                      params=sampler,
                      names=self.params.p_free_names,
                      chi2=chi2, ndof=len(self.bbcovar))
+            print("#DOF: ", str(len(self.bbcovar)))
+            print("#bpw ",str(self.n_bpws))
             print("Best fit:")
             for n, p in zip(self.params.p_free_names, sampler):
                 print(n+" = %.3lE" % p)
