@@ -13,6 +13,7 @@ class BBPowerSpecter(PipelineStage):
     """
     name = "BBPowerSpecter"
     inputs = [('splits_list', TextFile),
+              ('template', FitsFile),
               ('masks_apodized', FitsFile),
               ('bandpasses_list', TextFile),
               ('sims_list', TextFile),
@@ -52,7 +53,7 @@ class BBPowerSpecter(PipelineStage):
                 bb[:int(li[0])] = bi[0]
             self.beams['band%d' % (i_f+1)] = bb
 
-    def compute_cells_from_splits(self, splits_list):
+    def compute_cells_from_splits(self, splits_list, temp_fname):
         # Generate fields
         print(" Generating fields")
         fields = {}
@@ -68,6 +69,16 @@ class BBPowerSpecter(PipelineStage):
                 mp_q, mp_u = hp.read_map(fname, field=[2*b, 2*b+1],
                                          verbose=False)
                 fields[name] = self.get_field(b, [mp_q, mp_u])
+        print(" Generating template field")
+        b = self.n_channels-1
+        name = self.get_map_label(b)
+        fname = temp_fname
+        if not os.path.isfile(fname):
+            fname = fname + '.gz'
+        if not os.path.isfile(fname):
+            raise ValueError("Can't find file ", temp_fname)
+        mp_q, mp_u = hp.read_map(fname, field=[0, 1], verbose=False)
+        fields[name] = self.get_field(b, [mp_q, mp_u])
 
         # Iterate over field pairs
         print(" Computing cross-spectra")
@@ -91,6 +102,7 @@ class BBPowerSpecter(PipelineStage):
             for fname in f:
                 bpss_fnames.append(fname.strip())
         self.n_bpss = len(bpss_fnames)
+        self.n_channels = self.n_bpss+1
         self.bpss = {}
         for i_f, f in enumerate(bpss_fnames):
             nu, bnu = np.loadtxt(f, unpack=True)
@@ -104,7 +116,7 @@ class BBPowerSpecter(PipelineStage):
     def read_masks(self, nbands):
         self.masks = []
         for i in range(nbands):
-            m = hp.read_map(self.get_input('masks_apodized'),
+            m = hp.read_map(self.get_input('masks_apodized'), field=i,
                             verbose=False)
             self.masks.append(hp.ud_grade(m, nside_out=self.nside))
 
@@ -142,12 +154,28 @@ class BBPowerSpecter(PipelineStage):
     def get_fname_workspace(self, band1, band2):
         b1 = min(band1, band2)
         b2 = max(band1, band2)
-        return self.prefix_mcm+"_%d_%d.fits" % (b1+1, b2+1)
+
+        if b1 == self.n_channels-1:
+            name1 = '_temp'
+        else:
+            name1 = '_%d' % (b1+1)
+
+        if b2 == self.n_channels-1:
+            name2 = '_temp'
+        else:
+            name2 = '_%d' % (b2+1)
+
+        return self.prefix_mcm+name1+name2+'.fits'
 
     def get_field(self, band, mps):
+        if band == self.n_channels-1:
+            beam = np.ones(len(self.larr_all))
+        else:
+            beam = self.beams['band%d' % (band+1)]
+
         f = nmt.NmtField(self.masks[band],
                          mps,
-                         beam=self.beams['band%d' % (band+1)],
+                         beam=beam,
                          purify_b=self.config['purify_B'],
                          n_iter=self.config['n_iter'])
         return f
@@ -173,13 +201,28 @@ class BBPowerSpecter(PipelineStage):
 
         return w
 
-    def get_map_label(self, band, split):
-        return 'band%d_split%d' % (band+1,  split+1)
+    def get_map_label(self, band, split=None):
+        if band == self.n_channels-1:
+            return 'temp'
+        else:
+            return 'band%d_split%d' % (band+1,  split+1)
 
     def get_workspace_label(self, band1, band2):
         b1 = min(band1, band2)
         b2 = max(band1, band2)
-        return 'b%d_b%d' % (b1+1, b2+1)
+
+        if b1 == self.n_channels-1:
+            name1 = 'temp'
+        else:
+            name1 = 'b%d' % (b1+1)
+
+
+        if b2 == self.n_channels-1:
+            name2 = 'temp'
+        else:
+            name2 = 'b%d' % (b2+1)
+
+        return name1+'_'+name2
 
     def compute_workspaces(self):
         # Compute MCMs for all possible band combinations.
@@ -187,23 +230,41 @@ class BBPowerSpecter(PipelineStage):
         #  but the same across polarization channels and splits.
         print("Estimating mode-coupling matrices")
         self.workspaces = {}
-        for i1 in range(self.n_bpss):
-            for i2 in range(i1, self.n_bpss):
+        for i1 in range(self.n_channels):
+            for i2 in range(i1, self.n_channels):
                 name = self.get_workspace_label(i1, i2)
                 self.workspaces[name] = self.compute_workspace(i1, i2)
 
     def get_cell_iterator(self):
-        for b1 in range(self.n_bpss):
-            for b2 in range(b1, self.n_bpss):
-                for s1 in range(self.nsplits):
-                    l1 = self.get_map_label(b1, s1)
-                    if b1 == b2:
-                        splits_range = range(s1, self.nsplits)
+        for b1 in range(self.n_channels):
+            for b2 in range(b1, self.n_channels):
+                if b1 == self.n_channels-1:
+                    s1 = None
+                    l1 = self.get_map_label(b1)
+                    if b2 == self.n_channels-1:
+                        s2 = None
+                        l2 = self.get_map_label(b2)
+                        yield(b1, b2, s1, s2, l1, l2) # b1 and b2 are temp
                     else:
                         splits_range = range(self.nsplits)
-                    for s2 in splits_range:
-                        l2 = self.get_map_label(b2, s2)
-                        yield(b1, b2, s1, s2, l1, l2)
+                        for s2 in splits_range:
+                            l2 = self.get_map_label(b2, s2)
+                            yield(b1, b2, s1, s2, l1, l2) # b1 is temp but b2 is not
+                else:
+                    for s1 in range(self.nsplits):
+                        l1 = self.get_map_label(b1, s1)
+                        if b1 == b2:
+                            splits_range = range(s1, self.nsplits)
+                        else:
+                            splits_range = range(self.nsplits)
+                        if b2 == self.n_channels-1:
+                            s2 = None
+                            l2 = self.get_map_label(b2)
+                            yield(b1, b2, s1, s2, l1, l2) # b1 is not temp, b2 is temp
+                        else:
+                            for s2 in splits_range:
+                                l2 = self.get_map_label(b2, s2)
+                                yield(b1, b2, s1, s2, l1, l2) # b1 and b2 are not temp
 
     def get_sacc_tracers(self):
         sacc_t = []
@@ -217,12 +278,20 @@ class BBPowerSpecter(PipelineStage):
                                          quantity='cmb_polarization',
                                          bandpass_extra={'dnu': bpss['dnu']})
                 sacc_t.append(T)
+
+        b = self.n_channels-1
+        beam = np.ones(len(self.larr_all))
+        T = sacc.BaseTracer.make('Map', self.get_map_label(b),
+                                         2, self.larr_all, beam,
+                                         quantity='cmb_polarization')
+        sacc_t.append(T)
+
         return sacc_t
 
     def get_sacc_windows(self):
         windows_wsp = {}
-        for b1 in range(self.n_bpss):
-            for b2 in range(b1, self.n_bpss):
+        for b1 in range(self.n_channels):
+            for b2 in range(b1, self.n_channels):
                 name = self.get_workspace_label(b1, b2)
                 windows_wsp[name] = {}
                 wsp = self.workspaces[name]
@@ -286,7 +355,7 @@ class BBPowerSpecter(PipelineStage):
 
         # Read masks
         print("Reading masks")
-        self.read_masks(self.n_bpss)
+        self.read_masks(self.n_channels)
 
         # Compute all possible MCMs
         self.compute_workspaces()
@@ -297,6 +366,8 @@ class BBPowerSpecter(PipelineStage):
             for fname in f:
                 splits.append(fname.strip())
         self.nsplits = len(splits)
+        
+        temp = self.get_input('template')
 
         # Get SACC binning
         self.win = self.get_sacc_windows()
@@ -306,7 +377,7 @@ class BBPowerSpecter(PipelineStage):
 
         # Compute all possible cross-power spectra
         print("Computing all cross-correlations")
-        cell_data = self.compute_cells_from_splits(splits)
+        cell_data = self.compute_cells_from_splits(splits,temp)
 
         # Save output
         print("Saving to file")
@@ -337,8 +408,9 @@ class BBPowerSpecter(PipelineStage):
             #   Compute list of splits
             sim_splits = [d+'/obs_split%dof%d.fits' % (i+1, self.nsplits)
                           for i in range(self.nsplits)]
+            sim_temp = d+'/cmb_B_only.fits' # For tests with David's sims. Later: template.fits
             #   Compute all possible cross-power spectra
-            cell_sim = self.compute_cells_from_splits(sim_splits)
+            cell_sim = self.compute_cells_from_splits(sim_splits,sim_temp)
             #   Save output
             fname = prefix_out + "_sim%d.fits" % isim
             self.save_cell_to_file(cell_sim,
