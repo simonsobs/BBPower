@@ -17,20 +17,28 @@ class BBCompSep(PipelineStage):
     The foreground model parameters are defined in the config.yml file. 
     """
     name = "BBCompSep"
-    inputs = [('cells_coadded', FitsFile),('cells_noise', FitsFile),('cells_fiducial', FitsFile)]
-    outputs = [('param_chains', NpzFile), ('config_copy', YamlFile)]
+    inputs = [('cells_coadded', FitsFile),
+              ('cells_noise', FitsFile),
+              ('cells_fiducial', FitsFile),
+              ('cells_coadded_cov', FitsFile)] # Read covariance from separate file
+    outputs = [('param_chains', NpzFile),
+               ('config_copy', YamlFile)]
     config_options={'likelihood_type':'h&l', 'n_iters':32, 'nwalkers':16, 'r_init':1.e-3,
-                    'sampler':'emcee'}
+                    'sampler':'emcee', 'bands': 'all'}
 
     def setup_compsep(self):
         """
         Pre-load the data, CMB BB power spectrum, and foreground models.
         """
         self.parse_sacc_file()
+        if self.config['fg_model'].get('use_moments'):
+            print('Running moments')
+            self.precompute_w3j()
         self.load_cmb()
         self.fg_model = FGModel(self.config)
         self.params = ParameterManager(self.config)
         if self.config.get("diff"):
+            print('Running hybrid')            
             self.hybridparams = np.load(self.config['resid_seds'])
             hyb_params = self.hybridparams['params_cent']
             hyb_sigma = self.hybridparams['params_sigma']
@@ -38,9 +46,43 @@ class BBCompSep(PipelineStage):
             self.params.p_free_priors[6][2] = [hyb_params[0], hyb_sigma[0]]
             # Beta_d: [centre, sigma]
             self.params.p_free_priors[2][2] = [hyb_params[1], hyb_sigma[1]]
+            if hyb_sigma[0]==np.nan:
+                hyb_sigma[0]=0.1
+            if hyb_sigma[1]==np.nan:
+                hyb_sigma[1]=0.1
         if self.use_handl:
             self.prepare_h_and_l()
         return
+
+    def get_moments_lmax(self):
+        return self.config['fg_model'].get('moments_lmax', 384)
+
+    def precompute_w3j(self):
+        from pyshtools.utils import Wigner3j
+
+        lmax = self.get_moments_lmax()
+        ells_w3j = np.arange(0, lmax)
+        w3j = np.zeros_like(ells_w3j, dtype=float)
+        self.big_w3j = np.zeros((lmax, lmax, lmax))
+        for ell1 in ells_w3j[1:]:
+            for ell2 in ells_w3j[1:]:
+                w3j_array, ellmin, ellmax = Wigner3j(ell1, ell2, 0, 0, 0)
+                w3j_array = w3j_array[:ellmax - ellmin + 1]
+                # make the w3j_array the same shape as the w3j
+                if len(w3j_array) < len(ells_w3j):
+                    reference = np.zeros(len(w3j))
+                    reference[:w3j_array.shape[0]] = w3j_array
+                    w3j_array = reference
+
+                w3j_array = np.concatenate([w3j_array[-ellmin:],
+                                            w3j_array[:-ellmin]])
+                w3j_array = w3j_array[:len(ells_w3j)]
+                w3j_array[:ellmin] = 0
+
+                self.big_w3j[:, ell1, ell2] = w3j_array
+
+        self.big_w3j = self.big_w3j**2
+
 
     def matrix_to_vector(self, mat):
         return mat[..., self.index_ut_modes[0], self.index_ut_modes[1]]
@@ -76,15 +118,20 @@ class BBCompSep(PipelineStage):
 
     def parse_sacc_file(self):
         """
-        Reads the data in the sacc file included the power spectra, bandpasses, and window functions. 
+        Reads the data in the sacc file included the power spectra, 
+        bandpasses, and window functions. 
         """
+        # Decide if you're using H&L
         self.use_handl = self.config['likelihood_type'] == 'h&l'
 
+        # Read data
         self.s = sacc.Sacc.load_fits(self.get_input('cells_coadded'))
+        self.s_cov = sacc.Sacc.load_fits(self.get_input('cells_coadded_cov'))
         if self.use_handl:
             s_fid = sacc.Sacc.load_fits(self.get_input('cells_fiducial'))
             s_noi = sacc.Sacc.load_fits(self.get_input('cells_noise'))
 
+        # Keep only desired correlations
         self.pols = self.config['pol_channels']
         corr_all = ['cl_ee', 'cl_eb', 'cl_be', 'cl_bb']
         corr_keep = []
@@ -95,19 +142,26 @@ class BBCompSep(PipelineStage):
         for c in corr_all:
             if c not in corr_keep:
                 self.s.remove_selection(c)
+                self.s_cov.remove_selection(c)
                 if self.use_handl:
                     s_fid.remove_selection(c)
                     s_noi.remove_selection(c)
 
+        # Scale cuts 
         self.s.remove_selection(ell__gt=self.config['l_max'])
         self.s.remove_selection(ell__lt=self.config['l_min'])
+        self.s_cov.remove_selection(ell__gt=self.config['l_max'])
+        self.s_cov.remove_selection(ell__lt=self.config['l_min'])
         if self.use_handl:
             s_fid.remove_selection(ell__gt=self.config['l_max'])
             s_fid.remove_selection(ell__lt=self.config['l_min'])
             s_noi.remove_selection(ell__gt=self.config['l_max'])
             s_noi.remove_selection(ell__lt=self.config['l_min'])
 
-        tr_names = sorted(list(self.s.tracers.keys()))
+        if self.config['bands'] == 'all':
+            tr_names = sorted(list(self.s.tracers.keys()))
+        else:
+            tr_names = self.config['bands']
         self.nfreqs = len(tr_names)
         self.npol = len(self.pols)
         self.nmaps = self.nfreqs * self.npol
@@ -115,6 +169,7 @@ class BBCompSep(PipelineStage):
         self.ncross = (self.nmaps * (self.nmaps + 1)) // 2
         self.pol_order=dict(zip(self.pols,range(self.npol)))
 
+        # Collect bandpasses
         self.bpss = []
         for i_t, tn in enumerate(tr_names):
             t = self.s.tracers[tn]
@@ -126,19 +181,24 @@ class BBCompSep(PipelineStage):
             bnu = t.bandpass
             self.bpss.append(Bandpass(nu, dnu, bnu, i_t+1, self.config))
 
+        # Get ell sampling
+        # Example power spectrum        
         self.ell_b, _ = self.s.get_ell_cl('cl_' + 2 * self.pols[0].lower(),
                                           tr_names[0], tr_names[0])
+        # Avoid l<2
         win0 = self.s.data[0]['window']
         mask_w = win0.values > 1
         self.bpw_l = win0.values[mask_w]
         self.n_ell = len(self.bpw_l)
         self.n_bpws = len(self.ell_b)
+        # D_ell factor
         self.dl2cl = 2 * np.pi / (self.bpw_l * (self.bpw_l + 1))
         self.windows = np.zeros([self.ncross, self.n_bpws, self.n_ell])
 
-        if not (self.s.covariance.covmat.shape[-1] == len(self.s.mean) == self.n_bpws * self.ncross):
-            raise ValueError("C_ell vector's size is wrong")
-
+        # Get power spectra and covariances
+        if self.config['bands'] == 'all':
+            if not (self.s_cov.covariance.covmat.shape[-1] == len(self.s.mean) == self.n_bpws * self.ncross): 
+                raise ValueError("C_ell vector's size is wrong")
         v2d = np.zeros([self.n_bpws, self.ncross])
         if self.use_handl:
             v2d_noi = np.zeros([self.n_bpws, self.ncross])
@@ -148,6 +208,7 @@ class BBCompSep(PipelineStage):
         self.vector_indices = self.vector_to_matrix(np.arange(self.ncross, dtype=int)).astype(int)
         self.indx = []
 
+        # Parse into the right ordering
         for b1, b2, p1, p2, m1, m2, ind_vec in self._freq_pol_iterator():
             t1 = tr_names[b1]
             t2 = tr_names[b2]
@@ -170,7 +231,7 @@ class BBCompSep(PipelineStage):
                 pol2b = self.pols[p2b].lower()
                 cl_typb = f'cl_{pol1b}{pol2b}'
                 ind_b = self.s.indices(cl_typb, (t1b, t2b))
-                cv2d[:, ind_vec, :, ind_vecb] = self.s.covariance.covmat[ind_a][:, ind_b]
+                cv2d[:, ind_vec, :, ind_vecb] = self.s_cov.covariance.covmat[ind_a][:, ind_b] 
 
         #Store data
         self.bbdata = self.vector_to_matrix(v2d) #(nbpw, nf, nf)
@@ -200,22 +261,24 @@ class BBCompSep(PipelineStage):
             for ix in range(self.ncross_modes):
                 i, j = np.array(self.index_ut_modes)[:,ix]
                 for jx in range(self.ncross_modes): 
-                    m, n = np.array(self.index_ut_modes)[:,jx] 
+                    m, n = np.array(self.index_ut_modes)[:,jx]
+                    #import traceback
+                    #traceback.print_stack()
                     cv2d[:, ix, :, jx] = ccov[:, i, j, :, m, n]
         else:
             self.nmodes = self.nfreqs
             self.nmaps_modes = self.nmaps
             self.index_ut_modes = self.index_ut
             self.ncross_modes = self.ncross
-        self.bbcovar = cv2d.reshape([self.n_bpws * self.ncross_modes, self.n_bpws * self.ncross_modes])
-            
         if self.use_handl:
             self.bbnoise = self.vector_to_matrix(v2d_noi)
             self.bbfiducial = self.vector_to_matrix(v2d_fid)
-        
+        self.bbcovar = cv2d.reshape([self.n_bpws * self.ncross_modes,
+                                     self.n_bpws * self.ncross_modes])
         self.invcov = np.linalg.inv(self.bbcovar)
+        
         return
-
+    
     def load_cmb(self):
         """
         Loads the CMB BB spectrum as defined in the config file. 
@@ -227,6 +290,7 @@ class BBCompSep(PipelineStage):
         mask = (self.cmb_ells <= self.bpw_l.max()) & (self.cmb_ells > 1)
         self.cmb_ells = self.cmb_ells[mask]
 
+        # TODO: this is a patch
         nell = len(self.cmb_ells)
         self.cmb_tens = np.zeros([self.npol, self.npol, nell])
         self.cmb_lens = np.zeros([self.npol, self.npol, nell])
@@ -241,7 +305,7 @@ class BBCompSep(PipelineStage):
             self.cmb_scal[ind, ind] = cmb_lensingfile[:, 2][mask]
         return
 
-    def integrate_seds(self, params):
+    def integrate_seds(self, params): #NB different from NERSC
         fg_scaling = np.zeros([self.fg_model.n_components, self.nfreqs])
         rot_matrices = []
 
@@ -266,10 +330,10 @@ class BBCompSep(PipelineStage):
 
         return fg_scaling.T, rot_matrices
 
-    def evaluate_power_spectra(self, params):
+    def evaluate_power_spectra(self, params): #NB different from NERSC
         fg_pspectra = np.zeros([self.fg_model.n_components,
                                 self.fg_model.n_components,
-                                self.npol, self.npol, self.n_ell])
+                                self.npol, self.npol, self.n_ell]) #NB different from NERSC
         
         # Fill diagonal
         for i_c, c_name in enumerate(self.fg_model.component_names):
@@ -282,7 +346,7 @@ class BBCompSep(PipelineStage):
                                 for k in clfunc.params]
                 fg_pspectra[i_c, i_c, ip1, ip2, :] = clfunc.eval(self.bpw_l, *pspec_params) * self.dl2cl
 
-        # Off diagonals
+        # Off diagonals #NB different from NERSC
         for i_c1, c_name1 in enumerate(self.fg_model.component_names):
             for c_name2, epsname in self.fg_model.components[c_name1]['names_x_dict'].items():
                 i_c2 = self.fg_model.component_order[c_name2]
@@ -293,25 +357,47 @@ class BBCompSep(PipelineStage):
 
         return fg_pspectra
     
-    def model(self, params):
+    def model(self, params): #NB different from NERSC (dimensions)
         """
         Defines the total model and integrates over the bandpasses and windows. 
         """
+        # [npol,npol,nell]
         cmb_cell = (params['r_tensor'] * self.cmb_tens + \
                     params['A_lens'] * self.cmb_lens + \
-                    self.cmb_scal) * self.dl2cl # [npol,npol,nell]
-        fg_scaling, rot_m = self.integrate_seds(params)  # [nfreq, ncomp], [ncomp,nfreq,[matrix]]
-        fg_cell = self.evaluate_power_spectra(params)  # [ncomp,ncomp,npol,npol,nell]
-    
-        cls_array_fg = np.zeros([self.nfreqs,self.nfreqs,self.n_ell,self.npol,self.npol])
-        fg_cell = np.transpose(fg_cell, axes = [0,1,4,2,3])  # [ncomp,ncomp,nell,npol,npol]
-        cmb_cell = np.transpose(cmb_cell, axes = [2,0,1]) # [nell,npol,npol]
+                    self.cmb_scal) * self.dl2cl
+        # [nell,npol,npol]
+        cmb_cell = np.transpose(cmb_cell, axes = [2,0,1])
+        if self.config['cmb_model'].get('use_birefringence'):
+            bi_angle = np.radians(params['birefringence'])
+            c = np.cos(2*bi_angle)
+            s = np.sin(2*bi_angle)
+            bmat = np.array([[c, s],
+                             [-s, c]])
+            cmb_cell = rotate_cells_mat(bmat, bmat, cmb_cell)        
+        
+        # [nfreq, ncomp], [ncomp,nfreq,[matrix]]
+        fg_scaling, rot_m = self.integrate_seds(params) #NB different from NERSC (dimensions)
+        # [ncomp,ncomp,npol,npol,nell]
+        fg_cell = self.evaluate_power_spectra(params) #NB different from NERSC (dimensions)
+
+        # Add all components scaled in frequency (and HWP-rotated if needed)
+        # [nfreq, nfreq, nell, npol, npol]
+        cls_array_fg = np.zeros([self.nfreqs, self.nfreqs,
+                                 self.n_ell, self.npol, self.npol])
+        # [ncomp,ncomp,nell,npol,npol] 
+        fg_cell = np.transpose(fg_cell, axes = [0,1,4,2,3])  #NB different from NERSC
+
+        #NB different from NERSC no CMB scaling
+
+        # Loop over frequencies
         for f1 in range(self.nfreqs):
+            # Note that we only need to fill in half of the frequencies
             for f2 in range(f1,self.nfreqs):
-                cls=cmb_cell.copy()
-    
+                cls=cmb_cell.copy() #NB different from NERSC
+
+                # Loop over component pairs
                 for c1 in range(self.fg_model.n_components):
-                    mat1=rot_m[c1][f1]
+                    mat1=rot_m[c1][f1] #NB different from NERSC
                     a1=fg_scaling[f1,c1]
                     for c2 in range(self.fg_model.n_components):
                         mat2=rot_m[c2][f2]
@@ -320,7 +406,70 @@ class BBCompSep(PipelineStage):
                         cls += clrot*a1*a2
                 cls_array_fg[f1,f2]=cls
 
-        cls_array_list = np.zeros([self.n_bpws, self.nfreqs, self.npol, self.nfreqs, self.npol])
+        # Add moment terms if needed
+        # Start by assuming that there is no cross-correlation between components and betas
+        if self.config['fg_model'].get('use_moments'):
+            # TODO: moments work with:
+            # - B-only
+            # - No polarization angle business
+            # - Only power-law beta power spectra at l_pivot=80
+
+            # Evaluate 1st/2nd order SED derivatives.
+            # [nfreq, ncomp]
+            fg_scaling_d1 = self.integrate_seds_der(params, order=1)
+            fg_scaling_d2 = self.integrate_seds_der(params, order=2)
+
+            # Compute 1x1 for each component
+            # Compute 0x2 for each component (essentially this is sigma_beta)
+            # Evaluate beta power spectra.
+            lmax_mom = self.get_moments_lmax()
+            # [ncomp, nell, npol, npol]
+            cls_11 = np.zeros([self.fg_model.n_components, self.n_ell,
+                               self.npol, self.npol])
+            # [ncomp, nell, npol, npol]
+            cls_02 = np.zeros([self.fg_model.n_components, self.n_ell,
+                               self.npol, self.npol])
+
+            # component_1: dust, component_2: sync
+            for i_c, c_name in enumerate(self.fg_model.component_names):
+                comp = self.fg_model.components[c_name]
+                gamma = params[comp['names_moments_dict']['gamma_beta']]
+                amp = params[comp['names_moments_dict']['amp_beta']] * 1E-6
+                cl_betas = self.bcls(lmax=lmax_mom, gamma=gamma, amp=amp)
+                #cl_cc = fg_cell[i_c, :] #NERSC version
+                cl_cc = fg_cell[i_c, i_c, :] #NB different from NERSC
+                cls_1x1 = self.evaluate_1x1(params, lmax=lmax_mom,
+                                            cls_cc=cl_cc,
+                                            cls_bb=cl_betas)
+                cls_11[i_c, :lmax_mom, :, :] = cls_1x1
+
+                cls_0x2 = self.evaluate_0x2(params, lmax=lmax_mom,
+                                            cls_cc=cl_cc,
+                                            cls_bb=cl_betas)
+                cls_02[i_c, :lmax_mom, :, :] = cls_0x2
+
+            # Add components scaled in frequency
+            for f1 in range(self.nfreqs):
+                # Note that we only need to fill in half of the frequencies
+                for f2 in range(f1, self.nfreqs):
+                    cls = np.zeros([self.n_ell, self.npol, self.npol])
+                    for c1 in range(self.fg_model.n_components):
+                        cls += (fg_scaling_d1[f1, c1] * fg_scaling_d1[f2, c1] *
+                                cls_11[c1])
+                        #NERSC version
+                        #cls += 0.5 * (fg_scaling_d2[f1, c1] * 
+                        #              fg_scaling[c1, c1, f2, f2] +
+                        #              fg_scaling_d2[f2, c1] *
+                        #              fg_scaling[c1, c1, f1, f1]) * cls_02[c1]
+                        cls += 0.5 * (fg_scaling_d2[f1, c1] *
+                                      fg_scaling[f2, c1] +
+                                      fg_scaling_d2[f2, c1] *
+                                      fg_scaling[f1, c1]) * cls_02[c1]
+                    cls_array_fg[f1, f2] += cls
+
+        # Window convolution
+        cls_array_list = np.zeros([self.n_bpws, self.nfreqs,
+                                   self.npol, self.nfreqs, self.npol])
         for f1 in range(self.nfreqs):
             for p1 in range(self.npol):
                 m1 = f1*self.npol+p1
@@ -333,16 +482,79 @@ class BBCompSep(PipelineStage):
                         cls_array_list[:, f1, p1, f2, p2] = clband
                         if m1!=m2:
                             cls_array_list[:, f2, p2, f1, p1] = clband
-    
+
+        # Polarization angle rotation
         for f1 in range(self.nfreqs):
             for f2 in range(self.nfreqs):
-                cls_array_list[:,f1,:,f2,:] = rotate_cells(self.bpss[f2], self.bpss[f1],
+                cls_array_list[:,f1,:,f2,:] = rotate_cells(self.bpss[f2],
+                                                           self.bpss[f1],
                                                            cls_array_list[:,f1,:,f2,:],
                                                            params)
         cls_array_list = cls_array_list.reshape([self.n_bpws, self.nmaps, self.nmaps])
         if self.config.get("diff"):
             cls_array_list = np.einsum("aj,bk,ijk->iab", self.R, self.R, cls_array_list)
         return cls_array_list
+
+    def bcls(self, lmax, gamma, amp):
+        """
+        Model beta spectra as power laws.
+        """
+        ls = np.arange(lmax)
+        bcls = np.zeros(len(ls))
+        bcls[2:] = (ls[2:] / 80.)**gamma
+        return bcls*amp
+
+    def integrate_seds_der(self, params, order=1):
+        """
+        Define the first order derivative of the SED
+        """
+        fg_scaling_der = np.zeros([self.fg_model.n_components,
+                                   self.nfreqs])
+        
+        for i_c, c_name in enumerate(self.fg_model.component_names):
+            comp = self.fg_model.components[c_name]
+            units = comp['cmb_n0_norm']
+            sed_params = [params[comp['names_sed_dict'][k]]
+                          for k in comp['sed'].params]
+
+            # Set SED function with scaling beta
+            def sed_der(nu):
+                nu0 = params[comp['names_sed_dict']['nu0']]
+                x = np.log(nu / nu0)
+                # This is only valid for spectral indices
+                return x**order * comp['sed'].eval(nu, *sed_params)
+
+            for tn in range(self.nfreqs):
+                sed_b = self.bpss[tn].convolve_sed(sed_der, params)[0]
+                fg_scaling_der[i_c, tn] = sed_b * units
+
+        return fg_scaling_der.T
+
+    def evaluate_1x1(self, params, lmax, cls_cc, cls_bb):
+        """
+        Evaluate the 1x1 moment for auto-spectra
+        """
+        ls = np.arange(lmax)
+        v_left = (2*ls+1)[:, None, None] * cls_cc[:lmax, :, :]
+        v_right = (2*ls+1) * cls_bb[:lmax]
+
+        mat = self.big_w3j
+        v_left = np.transpose(v_left, axes=[1, 0, 2])
+        moment1x1 = np.dot(np.dot(mat, v_right), v_left) / (4*np.pi)
+        return moment1x1
+
+    def evaluate_0x2(self, params, lmax, cls_cc, cls_bb,
+                     gamma=None):
+        """
+        Evaluate the 0x2 moment for auto-spectra
+        Assume power law for beta
+        """
+        ls = np.arange(lmax)
+        if gamma is not None:
+            prefac = amp * (2 * sp.zeta(-gamma-1) + sp.zeta(-gamma) - 3) / (4 * np.pi * 80**gamma)
+        else:
+            prefac = np.sum( (2 * ls + 1) * cls_bb) / (4*np.pi)
+        return cls_cc[:lmax] * prefac
 
     def chi_sq_dx(self, params):
         """
@@ -358,10 +570,7 @@ class BBCompSep(PipelineStage):
         return 
 
     def h_and_l_dx(self, params):
-        """                                                                                                                                                                           
-        Hamimeche and Lewis likelihood.                                                                                                                                               
-        Taken from Cobaya written by H, L and Torrado                                                                                                                                 
-        See: https://github.com/CobayaSampler/cobaya/blob/master/cobaya/likelihoods/_cmblikes_prototype/_cmblikes_prototype.py                                                        
+        """                                                                                                 Hamimeche and Lewis likelihood.                                                                     Taken from Cobaya written by H, L and Torrado                                                       See: https://github.com/CobayaSampler/cobaya/blob/master/cobaya/likelihoods/_cmblikes_prototype/_cmblikes_prototype.py                                                        
         """
         model_cls = self.model(params)
         dx_vec = []
@@ -451,6 +660,8 @@ class BBCompSep(PipelineStage):
         end = time.time()
         return sampler, end-start
 
+    #NB different from NERSC: Add Polychord
+    
     def minimizer(self):
         """
         Find maximum likelihood
@@ -460,19 +671,26 @@ class BBCompSep(PipelineStage):
             c2=-2*self.lnprob(par)
             return c2
         res=minimize(chi2, self.params.p0, method="Powell")
-        return res.x
+
+        if len(self.params.p0)<2:
+            x = np.array([res.x])
+        else:
+            x = res.x
+        return x        
 
     def fisher(self):
         """
         Evaluate Fisher matrix
         """
         import numdifftools as nd
+        
         def lnprobd(p):
             l = self.lnprob(p)
             if l == -np.inf:
                 l = -1E100
             return l
         fisher = - nd.Hessian(lnprobd)(self.params.p0)
+        #NB different from NERSC: self.params.p0 given by chi^2 minim.
         return fisher
 
     def singlepoint(self):
@@ -493,6 +711,7 @@ class BBCompSep(PipelineStage):
         end = time.time()
         return end-start, (end-start)/n_eval
 
+    
     def run(self):
         from shutil import copyfile
         self.setup_compsep()

@@ -21,32 +21,40 @@
 ##        addqueue -q berg -c "2 hours" -m 1 -s -n 1x8 /usr/bin/python3 -m bbpower BBCompSep   --cells_coadded=$coadd   --cells_noise=$noise   --cells_fiducial=$fid   --param_chains=$chain   --config_copy=$configcopy   --config=$config
 ##    done
 ##done
-
-mdir="baseline_masked/"
-for k in 0 #{0..3}
+ellmin=30 #30 #2 #10
+#simt=d1s1_maskpysm_Bonly
+#simt=d1s1_maskpysm_Bonly_r0.01
+#simt=d1s1_maskpysm_Bonly_r0.01_whitenoiONLY
+simt=d1s1_maskpysm_Bonly_whitenoiONLY
+fsky=0.3 #0.6 #0.8
+#mdir="/mnt/extraspace/susanna/BBHybrid/baseline_masked_outs/mask_pysm/realistic/d1s1/fsky${fsky}_ellmin${ellmin}/"
+#mdir="/mnt/extraspace/susanna/BBHybrid/baseline_masked_outs/mask_pysm/realistic/d1s1/fsky${fsky}_ellmin${ellmin}_r0.01/"
+#mdir="/mnt/extraspace/susanna/BBHybrid/baseline_masked_outs/mask_pysm/realistic/d1s1/fsky${fsky}_ellmin${ellmin}_r0.01_whitenoiONLY/"
+mdir="/mnt/extraspace/susanna/BBHybrid/baseline_masked_outs/mask_pysm/realistic/d1s1/fsky${fsky}_ellmin${ellmin}_whitenoiONLY/"
+cf=$mdir"config.yml"
+for j in {0000..0020} #0000
 do
-    for j in 0000 #{0000..0020}
-    do
-        output=$mdir"sim0$k/output$j/"
-        mkdir -p $output
+    output=$mdir"output$j/"
+    mkdir -p $output
 
-	#cp test_hybrid/config.yml $output
-	#cp test_hybrid/config.yml $mdir
-	#cp baseline_masked/config_widerprior.yml $output
-	#cp baseline_masked/config.yml $output
-	cp test_BBSims_Hybrid/config.yaml ${mdir}config.yml
-	cp test_BBSims_Hybrid/config.yaml ${output}config.yml
+    #cp test_BBSims_Hybrid/config_baseline_d1s1.yaml ${mdir}config.yml
+    cp test_BBSims_Hybrid/config_baseline_fsky.yaml ${mdir}config.yml
 
-	datadir="/mnt/zfsusers/susanna/BBHybrid/data/sim0$k/"
-	#datadir="/mnt/zfsusers/susanna/BBHybrid/data/sims_DA/sim0$k/"
-        coadd=$datadir"cls_coadd_baseline_masked_$j.fits"
-        noise=$datadir"cls_noise_baseline_masked_$j.fits"
-        fid=$datadir"cls_fid_baseline_masked_$j.fits"
-        chain=$output"param_chains.npz"
-        configcopy=$output"config_copy.yml"
-        config=$mdir"config.yml"
+    cp $cf $output
+    config=$output"config.yml"
+    sed -i "s/KK/${ellmin}/" $config
 
-	addqueue -s -q cmb -c '2 hours' -m 4 -s -n 1x12 /usr/bin/python3 -m bbpower BBCompSep   --cells_coadded=$coadd   --cells_noise=$noise   --cells_fiducial=$fid   --param_chains=$chain   --config_copy=$configcopy   --config=$config
-    done
+    echo $config
+
+    datadir="/mnt/zfsusers/susanna/BBHybrid/data/sim${simt}/fsky${fsky}/"
+    coadd=$datadir"cls_coadd_baseline_masked_$j.fits"
+    noise=$datadir"cls_noise_baseline_masked_$j.fits"
+    fid=$datadir"cls_fid_baseline_masked_$j.fits"
+    chain=$output"param_chains.npz"
+    configcopy=$output"config_copy.yml"
+    
+    addqueue -s -q cmb -c 'baseline fsky0.3 1 hour' -m 4 -s -n 1x12 /usr/bin/python3 -m bbpower BBCompSep   --cells_coadded=$coadd   --cells_noise=$noise   --cells_fiducial=$fid   --param_chains=$chain   --config_copy=$configcopy   --config=$config
+
 done
+
 

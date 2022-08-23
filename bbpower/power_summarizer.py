@@ -15,6 +15,7 @@ class BBPowerSummarizer(PipelineStage):
                     'data_covar_type':'block_diagonal',
                     'data_covar_diag_order': 3}
 
+
     def get_covariance_from_samples(self,v,s,covar_type='dense',
                                     off_diagonal_cut=0):
         """

@@ -12,7 +12,8 @@ alllabels = {'A_lens':'A_{lens}', 'r_tensor':'r', 'beta_d':'\\beta_d', 'epsilon_
              'shift_10':'\Delta\\nu_{10}', 'shift_11':'\Delta\\nu_{11}', 'shift_12':'\Delta\\nu_{12}', 
              'angle_1':'\phi_1', 'angle_2':'\phi_2', 'angle_3':'\phi_3', 'angle_4':'\phi_4', 
              'angle_5':'\phi_5', 'angle_6':'\phi_6', 'dphi1_1':'\Delta\phi_1', 'dphi1_2':'\Delta\phi_2', 
-             'dphi1_3':'\Delta\phi_3', 'dphi1_4':'\Delta\phi_4', 'dphi1_5':'\Delta\phi_5', 'dphi1_6':'\Delta\phi_6'}
+             'dphi1_3':'\Delta\phi_3', 'dphi1_4':'\Delta\phi_4', 'dphi1_5':'\Delta\phi_5', 'dphi1_6':'\Delta\phi_6',
+             'amp_d_beta': 'B_d', 'gamma_d_beta': '\\gamma_{d}', 'amp_s_beta': 'B_s', 'gamma_s_beta': '\\gamma_{s}'}
 
 
 allranges={'$r$': [-1.0, 1.0],
@@ -34,5 +35,8 @@ allranges={'$r$': [-1.0, 1.0],
  '$A^{EB}_s$': [-100.0, 100.0],
  '$\\alpha^{EB}_s$': [-3.0, 1.0],
  '$\\theta$': [-30., 30.], 
- '$\\Delta_s$': [0.9, 1.1]}
-
+ '$\\Delta_s$': [0.9, 1.1],
+ '$B_d$':[0., 10],
+ '$\\gamma_{d}$':[-6, -2],
+ '$B_s$':[0, 10],
+ '$\\gamma_{s}$':[-6, -2]}
