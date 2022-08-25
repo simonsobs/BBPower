@@ -38,12 +38,13 @@ class BBPowerSummarizer(PipelineStage):
                     cuts -= np.diag(np.ones(self.n_bpws-i),k=-i)
                 cov = cov.reshape([nblocks, self.n_bpws, nblocks, self.n_bpws])
                 cov = (cov * cuts[None, :, None, :]).reshape([nd, nd])
-            else: #import pre-computed covariance from sims added SA
+            else: #import pre-computed covariance from sims
                 import os
-                if not os.path.isfile(covar_type+'cells_coadded.fits'):
-                    raise ValueError("Can't find file ", covar_type+'cells_coadded.fits')
+                if not os.path.isfile(covar_type+'cells_coadded.sacc'):
+                    raise ValueError("Can't find file ", covar_type+'cells_coadded.sacc')
                 else:
-                    scv = sacc.Sacc().load_fits(covar_type+'cells_coadded.fits')
+                    print(f'Importing covariance from {covar_type}')
+                    scv = sacc.Sacc().load_fits(covar_type+'cells_coadded.sacc')
                     cov = scv.covariance.covmat
         s.add_covariance(cov)
 
@@ -350,38 +351,47 @@ class BBPowerSummarizer(PipelineStage):
 
         # Read data file, coadd and compute nulls
         print("Reading data")
-        summ = self.parse_splits_sacc_file(self.s_splits, get_saccs=True, with_windows=True)
-        
-        # Read simulations
-        print("Reading simulations")
-        sim_cd_t=np.zeros([self.nsims,len(summ['spectra'][0])])
-        sim_cd_x=np.zeros([self.nsims,len(summ['spectra'][1])])
-        sim_cd_n=np.zeros([self.nsims,len(summ['spectra'][2])])
-        sim_null=np.zeros([self.nsims,len(summ['spectra'][3])])
-        for i, fn in enumerate(self.fname_sims):
-            print(fn)
-            s=sacc.Sacc.load_fits(fn)
-            sb=self.parse_splits_sacc_file(s)
-            sim_cd_t[i,:]=sb['spectra'][0]
-            sim_cd_x[i,:]=sb['spectra'][1]
-            sim_cd_n[i,:]=sb['spectra'][2]
-            sim_null[i,:]=sb['spectra'][3]
+        summ = self.parse_splits_sacc_file(self.s_splits,
+                                           get_saccs=True,
+                                           with_windows=True)
 
-        # Compute covariance
-        print("Covariances")
-        cov_cd_t=self.get_covariance_from_samples(sim_cd_t, summ['saccs'][0],
-                                                  covar_type=self.config['data_covar_type'],
-                                                  off_diagonal_cut=self.config['data_covar_diag_order'])
-        cov_cd_x=self.get_covariance_from_samples(sim_cd_x, summ['saccs'][1],
-                                                  covar_type=self.config['data_covar_type'],
-                                                  off_diagonal_cut=self.config['data_covar_diag_order'])
-        cov_cd_n=self.get_covariance_from_samples(sim_cd_n, summ['saccs'][2],
-                                                  covar_type=self.config['data_covar_type'],
-                                                  off_diagonal_cut=self.config['data_covar_diag_order'])
-        # There are so many nulls that we'll probably run out of memory
-        cov_null=self.get_covariance_from_samples(sim_null, summ['saccs'][3],
-                                                  covar_type=self.config['nulls_covar_type'],
-                                                  off_diagonal_cut=self.config['nulls_covar_diag_order'])
+        # Re-compute covariance only if it is not pre-computed
+        # i.e. if no directory is specified in covar_type in config
+        if self.config['data_covar_type']=='dense' or self.config['data_covar_type']=='diagonal' or self.config['data_covar_type']=='block_diagonal':
+            # Read simulations
+            print("Reading simulations")
+            sim_cd_t = np.zeros([self.nsims, len(summ['spectra'][0])])
+            sim_cd_x = np.zeros([self.nsims, len(summ['spectra'][1])])
+            sim_cd_n = np.zeros([self.nsims, len(summ['spectra'][2])])
+            sim_null = np.zeros([self.nsims, len(summ['spectra'][3])])
+            for i, fn in enumerate(self.fname_sims):
+                #print(fn)
+                s = sacc.Sacc.load_fits(fn)
+                sb = self.parse_splits_sacc_file(s)
+                sim_cd_t[i, :] = sb['spectra'][0]
+                sim_cd_x[i, :] = sb['spectra'][1]
+                sim_cd_n[i, :] = sb['spectra'][2]
+                sim_null[i, :] = sb['spectra'][3]
+
+            # Compute covariance
+            print("Covariances")
+            dctyp = self.config['data_covar_type']
+            dcord = self.config['data_covar_diag_order']
+            self.get_covariance_from_samples(sim_cd_t, summ['saccs'][0],
+                                             covar_type=dctyp,
+                                             off_diagonal_cut=dcord)
+            self.get_covariance_from_samples(sim_cd_x, summ['saccs'][1],
+                                             covar_type=dctyp,
+                                             off_diagonal_cut=dcord)
+            self.get_covariance_from_samples(sim_cd_n, summ['saccs'][2],
+                                             covar_type=dctyp,
+                                             off_diagonal_cut=dcord)
+            # There are so many nulls that we'll probably run out of memory
+            nctyp = self.config['nulls_covar_type']
+            ncord = self.config['nulls_covar_diag_order']
+            self.get_covariance_from_samples(sim_null, summ['saccs'][3],
+                                             covar_type=nctyp,
+                                             off_diagonal_cut=ncord)
 
         # Save data
         print("Writing output")
