@@ -42,14 +42,13 @@ class BBCompSep(PipelineStage):
             self.hybridparams = np.load(self.config['resid_seds'])
             hyb_params = self.hybridparams['params_cent']
             hyb_sigma = self.hybridparams['params_sigma']
+            pnames = np.array(self.params.p_free_names)
+            ind_bs = int(np.where(pnames == 'beta_s')[0])
+            ind_bd = int(np.where(pnames == 'beta_d')[0])
             # Beta_s: [centre, sigma]
-            self.params.p_free_priors[6][2] = [hyb_params[0], hyb_sigma[0]]
+            self.params.p_free_priors[ind_bs][2] = [hyb_params[0], hyb_sigma[0]]
             # Beta_d: [centre, sigma]
-            self.params.p_free_priors[2][2] = [hyb_params[1], hyb_sigma[1]]
-            if hyb_sigma[0]==np.nan:
-                hyb_sigma[0]=0.1
-            if hyb_sigma[1]==np.nan:
-                hyb_sigma[1]=0.1
+            self.params.p_free_priors[ind_bd][2] = [hyb_params[1], hyb_sigma[1]]
         if self.use_handl:
             self.prepare_h_and_l()
         return
@@ -644,8 +643,11 @@ class BBCompSep(PipelineStage):
 
         if not found_file:
             backend.reset(nwalkers,ndim)
-            p0 = self.minimizer()
-            pos = [p0 + 1.e-3*np.random.randn(ndim) for i in range(nwalkers)]
+            #p0 = self.minimizer()
+            #pos = [p0 + 1.e-3*np.random.randn(ndim) for i in range(nwalkers)]
+            #nsteps_use = n_iters
+            pos = [self.params.p0 + 1.e-3*np.random.randn(ndim)
+                   for i in range(nwalkers)]
             nsteps_use = n_iters
         else:
             print("Restarting from previous run")
@@ -676,6 +678,29 @@ class BBCompSep(PipelineStage):
             x = np.array([res.x])
         else:
             x = res.x
+
+        #############################################################
+        ### Plot Cls
+        ##bbdata_cls = self.bbdata # n_bpws, nfreqs, nfreqs
+        ##names=self.params.p_free_names
+        ##parameters = dict(zip(list(names),res.x))
+        ###print(parameters)
+        ##parameters['nu0_d'] = 220.
+        ##parameters['nu0_s'] = 40.
+        ##model_cls = self.model(parameters) # n_bpws, nfreqs, nfreqs
+        ##
+        ### Select the upper triangle
+        ##for i in range(self.nfreqs):
+        ##    for j in range(i, self.nfreqs):
+        ##        import matplotlib.pyplot as plt
+        ##        plt.figure()
+        ##        plt.plot(self.ell_b, bbdata_cls[:,i,j], label='data')
+        ##        plt.plot(self.ell_b, model_cls[:,i,j], label='theory')
+        ##        plt.legend()
+        ##        plt.savefig(f'03_s000_model_vs_data_{i}_{j}.png',bbox_inches='tight')
+        ##exit()
+        #############################################################
+
         return x        
 
     def fisher(self):

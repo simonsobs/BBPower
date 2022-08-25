@@ -92,6 +92,7 @@ class ParameterManager(object):
     def lnprior(self, par):
         lnp = 0
         for p, pr in zip(par, self.p_free_priors):
+            #if not p[1] == 'fixed':
             if np.char.lower(pr[1]) == 'gaussian':  # Gaussian prior
                 lnp += -0.5 * ((p - pr[2][0])/pr[2][1])**2
             else:  # Only other option is top-hat
