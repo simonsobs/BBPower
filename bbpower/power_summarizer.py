@@ -38,6 +38,13 @@ class BBPowerSummarizer(PipelineStage):
                     cuts -= np.diag(np.ones(self.n_bpws-i),k=-i)
                 cov = cov.reshape([nblocks, self.n_bpws, nblocks, self.n_bpws])
                 cov = (cov * cuts[None, :, None, :]).reshape([nd, nd])
+            else: #import pre-computed covariance from sims added SA
+                import os
+                if not os.path.isfile(covar_type+'cells_coadded.fits'):
+                    raise ValueError("Can't find file ", covar_type+'cells_coadded.fits')
+                else:
+                    scv = sacc.Sacc().load_fits(covar_type+'cells_coadded.fits')
+                    cov = scv.covariance.covmat
         s.add_covariance(cov)
 
     def init_params(self):
