@@ -3,7 +3,7 @@ import os
 from scipy.linalg import sqrtm
 
 from bbpipe import PipelineStage
-from .types import NpzFile, FitsFile, YamlFile
+from .types import NpzFile, FitsFile, YamlFile, DirFile
 from .fg_model import FGModel
 from .param_manager import ParameterManager
 from .bandpasses import (Bandpass, rotate_cells, rotate_cells_mat,
@@ -21,7 +21,7 @@ class BBCompSep(PipelineStage):
     inputs = [('cells_coadded', FitsFile),
               ('cells_noise', FitsFile),
               ('cells_fiducial', FitsFile)]
-    outputs = [('param_chains', NpzFile),
+    outputs = [('output_dir', DirFile),
                ('config_copy', YamlFile)]
     config_options = {'likelihood_type': 'h&l', 'n_iters': 32,
                       'nwalkers': 16, 'r_init': 1.e-3,
@@ -611,8 +611,7 @@ class BBCompSep(PipelineStage):
         import emcee
         from multiprocessing import Pool
 
-        fname_temp = self.get_output('param_chains')+'.h5'
-
+        fname_temp = self.get_output('output_dir')+'/emcee.npz.h5'
         backend = emcee.backends.HDFBackend(fname_temp)
 
         nwalkers = self.config['nwalkers']
@@ -674,7 +673,7 @@ class BBCompSep(PipelineStage):
             print("Last dead point:", dead[-1])
 
         settings = PolyChordSettings(ndim, nder)
-        settings.base_dir = self.get_output('param_chains')[:-4] # Remove ".npz"
+        settings.base_dir = self.get_output('output_dir')+'/polychord'
         settings.file_root = 'pch'
         settings.nlive = self.config['nlive']
         settings.num_repeats = self.config['nrepeat']
@@ -745,6 +744,26 @@ class BBCompSep(PipelineStage):
         end = time.time()
 
         return end-start, (end-start)/n_eval
+    
+    def predicted_spectra(self):
+        """
+        Evaluates model at a the maximum likelihood and 
+        writes predicted spectra into a numpy array 
+        with shape (nbpws, nmaps, nmaps).
+        """
+        sampler = self.minimizer()
+        p = np.array(sampler)
+        model_cls = self.model(self.params.build_params(p))
+        if self.config['bands'] == 'all':
+            tr_names = sorted(list(self.s.tracers.keys()))
+        else:
+            tr_names = self.config['bands']
+        np.savez(self.get_output('output_dir')+'/cells_model.npz',
+                 tracers=tr_names, 
+                 ls=self.ell_b, 
+                 dls=model_cls)
+        
+        return
 
     def run(self):
         from shutil import copyfile
@@ -752,7 +771,7 @@ class BBCompSep(PipelineStage):
         self.setup_compsep()
         if self.config.get('sampler') == 'emcee':
             sampler, timing = self.emcee_sampler()
-            np.savez('/'.join(self.get_output('param_chains').split('/')[:-1])+'/param_chains',
+            np.savez(self.get_output('output_dir')+'/emcee.npz',
                      chain=sampler.chain,
                      names=self.params.p_free_names,
                      time=timing)
@@ -765,13 +784,13 @@ class BBCompSep(PipelineStage):
             cov = np.linalg.inv(fisher)
             for i, (n, p) in enumerate(zip(self.params.p_free_names, p0)):
                 print(n+" = %.3lE +- %.3lE" % (p, np.sqrt(cov[i, i])))
-            np.savez(self.get_output('param_chains'),
+            np.savez(self.get_output('output_dir')+'/fisher.npz',
                      params=p0, fisher=fisher,
                      names=self.params.p_free_names)
         elif self.config.get('sampler') == 'maximum_likelihood':
             sampler = self.minimizer()
             chi2 = -2*self.lnprob(sampler)
-            np.savez(self.get_output('param_chains'),
+            np.savez(self.get_output('output_dir')+'/chi2.npz',
                      params=sampler,
                      names=self.params.p_free_names,
                      chi2=chi2, ndof=len(self.bbcovar))
@@ -781,17 +800,20 @@ class BBCompSep(PipelineStage):
             print("Chi2: %.3lE" % chi2)
         elif self.config.get('sampler') == 'single_point':
             sampler = self.singlepoint()
-            np.savez(self.get_output('param_chains'),
+            np.savez(self.get_output('output_dir')+'/single_point.npz',
                      chi2=sampler, ndof=len(self.bbcovar),
                      names=self.params.p_free_names)
-            print("Chi^2:", sampler, len(self.bbcovar))
+            print("Chi2:", sampler, len(self.bbcovar))
         elif self.config.get('sampler') == 'timing':
             sampler = self.timing()
-            np.savez(self.get_output('param_chains'),
+            np.savez(self.get_output('output_dir')+'/timing.npz',
                      timing=sampler[1],
                      names=self.params.p_free_names)
             print("Total time:", sampler[0])
             print("Time per eval:", sampler[1])
+        elif self.config.get('sampler')=='predicted_spectra':
+            sampler = self.predicted_spectra()
+            print("Predicted spectra saved")
         else:
             raise ValueError("Unknown sampler")
 
