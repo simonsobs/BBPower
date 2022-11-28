@@ -439,9 +439,9 @@ class BBCompSep(PipelineStage):
                         cls += (fg_scaling_d1[f1, c1] * fg_scaling_d1[f2, c1] *
                                 cls_11[c1])
                         cls += 0.5 * (fg_scaling_d2[f1, c1] *
-                                      fg_scaling[c1, c1, f2, f2] +
+                                      (fg_scaling[c1, c1, f2, f2])**0.5 +
                                       fg_scaling_d2[f2, c1] *
-                                      fg_scaling[c1, c1, f1, f1]) * cls_02[c1]
+                                      (fg_scaling[c1, c1, f1, f1])**0.5) * cls_02[c1]
                     cls_array_fg[f1, f2] += cls
 
         # Window convolution
@@ -635,13 +635,16 @@ class BBCompSep(PipelineStage):
             nsteps_use = max(n_iters-nchain, 0)
 
         with Pool() as pool:
+            import time
+            start = time.time()
             sampler = emcee.EnsembleSampler(nwalkers, ndim,
                                             self.lnprob,
                                             backend=backend)
             if nsteps_use > 0:
                 sampler.run_mcmc(pos, nsteps_use, store=True, progress=False)
+                end = time.time()
 
-        return sampler
+        return sampler, end-start
 
     def polychord_sampler(self):
         import pypolychord
@@ -767,11 +770,12 @@ class BBCompSep(PipelineStage):
         copyfile(self.get_input('config'), self.get_output('config_copy'))
         self.setup_compsep()
         if self.config.get('sampler') == 'emcee':
-            sampler = self.emcee_sampler()
+            sampler, timing = self.emcee_sampler()
             np.savez(self.get_output('output_dir')+'/emcee.npz',
                      chain=sampler.chain,
-                     names=self.params.p_free_names)
-            print("Finished sampling")
+                     names=self.params.p_free_names,
+                     time=timing)
+            print("Finished sampling", timing)
         elif self.config.get('sampler')=='polychord':
             sampler = self.polychord_sampler()
             print("Finished sampling")
