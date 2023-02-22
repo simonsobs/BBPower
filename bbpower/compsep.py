@@ -114,6 +114,11 @@ class BBCompSep(PipelineStage):
         # Read data
         self.s = sacc.Sacc.load_fits(self.get_input('cells_coadded'))
         self.s_cov = sacc.Sacc.load_fits(self.get_input('cells_coadded_cov'))
+        tr_comb = self.s.get_tracer_combinations()
+        for tr1, tr2 in tr_comb:
+            ind1 = self.s.indices(data_type='cl_bb', tracers=(tr1, tr2))
+            ind2 = self.s_cov.indices(data_type='cl_bb', tracers=(tr1, tr2))
+            assert np.all(ind1 == ind2), "Covariance sacc ordering is wrong"
         if self.use_handl:
             s_fid = sacc.Sacc.load_fits(self.get_input('cells_fiducial'))
             s_noi = sacc.Sacc.load_fits(self.get_input('cells_noise'))
