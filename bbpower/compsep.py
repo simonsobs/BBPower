@@ -3,7 +3,7 @@ import os
 from scipy.linalg import sqrtm
 
 from bbpipe import PipelineStage
-from .types import NpzFile, FitsFile, YamlFile, DirFile, TextFile
+from .types import NpzFile, FitsFile, YamlFile, DirFile
 from .fg_model import FGModel
 from .param_manager import ParameterManager
 from .bandpasses import (Bandpass, rotate_cells, rotate_cells_mat,
@@ -20,8 +20,7 @@ class BBCompSep(PipelineStage):
     name = "BBCompSep"
     inputs = [('cells_coadded', FitsFile),
               ('cells_noise', FitsFile),
-              ('cells_fiducial', FitsFile),
-              ('analytic_temp_BB', TextFile)]
+              ('cells_fiducial', FitsFile)]
     outputs = [('output_dir', DirFile),
                ('config_copy', YamlFile)]
     config_options = {'likelihood_type': 'h&l', 'n_iters': 32,
@@ -32,13 +31,10 @@ class BBCompSep(PipelineStage):
         """
         Pre-load the data, CMB BB power spectrum, and foreground models.
         """
-        self.delensing = self.config['delensing']
         self.parse_sacc_file()
         if self.config['fg_model'].get('use_moments'):
             self.precompute_w3j()
         self.load_cmb()
-        if self.delensing:
-            self.load_template_model()
         self.fg_model = FGModel(self.config)
         self.params = ParameterManager(self.config)
         if self.use_handl:
@@ -93,10 +89,10 @@ class BBCompSep(PipelineStage):
 
     def _freq_pol_iterator(self):
         icl = -1
-        for b1 in range(self.n_channels):
+        for b1 in range(self.nfreqs):
             for p1 in range(self.npol):
                 m1 = p1 + self.npol * b1
-                for b2 in range(b1, self.n_channels):
+                for b2 in range(b1, self.nfreqs):
                     if b1 == b2:
                         p2_r = range(p1, self.npol)
                     else:
@@ -148,17 +144,9 @@ class BBCompSep(PipelineStage):
             tr_names = sorted(list(self.s.tracers.keys()))
         else:
             tr_names = self.config['bands']
-            if self.delensing:
-                tr_names.append('temp')
-        self.n_channels = len(tr_names)
-        if self.delensing:
-            self.n_channels_del = self.n_channels
-            self.nfreqs = self.n_channels-1
-        else:
-            self.n_channels_del = self.n_channels+1
-            self.nfreqs = self.n_channels
+        self.nfreqs = len(tr_names)
         self.npol = len(self.pols)
-        self.nmaps = self.n_channels * self.npol
+        self.nmaps = self.nfreqs * self.npol
         self.index_ut = np.triu_indices(self.nmaps)
         self.ncross = (self.nmaps * (self.nmaps + 1)) // 2
         self.pol_order = dict(zip(self.pols, range(self.npol)))
@@ -166,8 +154,6 @@ class BBCompSep(PipelineStage):
         # Collect bandpasses
         self.bpss = []
         for i_t, tn in enumerate(tr_names):
-            if tn == 'temp':
-                continue
             t = self.s.tracers[tn]
             nu = t.nu
             dnu = np.zeros_like(nu)
@@ -270,23 +256,6 @@ class BBCompSep(PipelineStage):
             self.cmb_tens[ind, ind] = (cmb_bbfile[:, 2][mask] -
                                        cmb_lensingfile[:, 2][mask])
             self.cmb_scal[ind, ind] = cmb_lensingfile[:, 2][mask]
-        return
-
-    def load_template_model(self):
-
-        # Loads analytical template spectra: EE, EB and BE = 0, BB given by eq. (29) of arXiv:2110.09730
-
-        self.analytic_TempxTemp = np.zeros([self.n_ell, self.npol, self.npol])
-        temp_file = np.loadtxt(self.get_input('analytic_temp_BB')) # Precomputed template D_ells
-        temp_ells = temp_file[:,0]
-        mask = (temp_ells <= self.bpw_l.max()) & (temp_ells > 1)
-        temp_ells = temp_ells[mask]
-        temp_BB = temp_file[:,1][mask]
-
-        if 'B' in self.config['pol_channels']:
-            ind = self.pol_order['B']
-            self.analytic_TempxTemp[:, ind, ind] = temp_BB * self.dl2cl
-
         return
 
     def integrate_seds(self, params):
@@ -473,42 +442,33 @@ class BBCompSep(PipelineStage):
                                       (fg_scaling[c1, c1, f2, f2])**0.5 +
                                       fg_scaling_d2[f2, c1] *
                                       (fg_scaling[c1, c1, f1, f1])**0.5) * cls_02[c1]
-                    cls_array_fg[f1, f2] += cls # [nfreq, nfreq, nell, npol, npol]
+                    cls_array_fg[f1, f2] += cls
 
         # Window convolution
-        cls_array_list = np.zeros([self.n_bpws, self.n_channels,
-                                   self.npol, self.n_channels,
+        cls_array_list = np.zeros([self.n_bpws, self.nfreqs,
+                                   self.npol, self.nfreqs,
                                    self.npol])
-        for b1 in range(self.n_channels):
+        for f1 in range(self.nfreqs):
             for p1 in range(self.npol):
-                m1 = b1*self.npol+p1
-                for b2 in range(b1, self.n_channels):
-                    p0 = p1 if b1 == b2 else 0
+                m1 = f1*self.npol+p1
+                for f2 in range(f1, self.nfreqs):
+                    p0 = p1 if f1 == f2 else 0
                     for p2 in range(p0, self.npol):
-                        m2 = b2*self.npol+p2
+                        m2 = f2*self.npol+p2
                         windows = self.windows[self.vector_indices[m1, m2]]
-                        if b1 != self.n_channels_del-1 and b2 != self.n_channels_del-1: # Only relevant case when delensing is turned off
-                            clband = np.dot(windows, cls_array_fg[b1, b2, :, p1, p2])
-                        else: # Analytically, template & B-modes cross-spectrum is the same as template auto-spectrum
-                            clband = np.dot(windows, self.analytic_TempxTemp[:,p1,p2])
-                        cls_array_list[:, b1, p1, b2, p2] = clband
+                        clband = np.dot(windows, cls_array_fg[f1, f2, :,
+                                                              p1, p2])
+                        cls_array_list[:, f1, p1, f2, p2] = clband
                         if m1 != m2:
-                            cls_array_list[:, b2, p2, b1, p1] = clband
+                            cls_array_list[:, f2, p2, f1, p1] = clband
 
         # Polarization angle rotation
-        for b1 in range(self.n_channels):
-            for b2 in range(self.n_channels):
-                if b1 != self.n_channels_del-1:
-                    mat1 = self.bpss[b1].get_rotation_matrix(params)
-                else: # Lensing template doesn't have a bandpass
-                    mat1 = np.identity(self.npol)
-                if b2 != self.n_channels_del-1:
-                    mat2 = self.bpss[b2].get_rotation_matrix(params)
-                else:
-                    mat2 = np.identity(self.npol)
-                cls_array_list[:, b1, :, b2, :] = rotate_cells_mat(mat2,
-                                                                   mat1,
-                                                                   cls_array_list[:, b1, :, b2, :])
+        for f1 in range(self.nfreqs):
+            for f2 in range(self.nfreqs):
+                cls_array_list[:, f1, :, f2, :] = rotate_cells(self.bpss[f2],
+                                                               self.bpss[f1],
+                                                               cls_array_list[:, f1, :, f2, :],
+                                                               params)
 
         return cls_array_list.reshape([self.n_bpws, self.nmaps, self.nmaps])
 
@@ -576,7 +536,7 @@ class BBCompSep(PipelineStage):
 
     def prepare_h_and_l(self):
         fiducial_noise = self.bbfiducial + self.bbnoise
-        self.Cfl_sqrt = np.array([sqrtm(f) for f in fiducial_noise],dtype='float64')
+        self.Cfl_sqrt = np.array([sqrtm(f) for f in fiducial_noise])
         self.observed_cls = self.bbdata + self.bbnoise
         return
 
@@ -591,10 +551,7 @@ class BBCompSep(PipelineStage):
         for k in range(model_cls.shape[0]):
             C = model_cls[k] + self.bbnoise[k]
             X = self.h_and_l(C, self.observed_cls[k], self.Cfl_sqrt[k])
-            if np.any(np.isnan(X)):
-                print('dx is NaN')
             if np.any(np.isinf(X)):
-                print('dx is inf')
                 return [np.inf]
             dx = self.matrix_to_vector(X).flatten()
             dx_vec = np.concatenate([dx_vec, dx])
@@ -653,7 +610,7 @@ class BBCompSep(PipelineStage):
         """
         import emcee
         from multiprocessing import Pool
-        
+
         fname_temp = self.get_output('output_dir')+'/emcee.npz.h5'
         backend = emcee.backends.HDFBackend(fname_temp)
 
@@ -685,7 +642,7 @@ class BBCompSep(PipelineStage):
                                             backend=backend)
             if nsteps_use > 0:
                 sampler.run_mcmc(pos, nsteps_use, store=True, progress=False)
-            end = time.time()
+                end = time.time()
 
         return sampler, end-start
 
@@ -801,8 +758,6 @@ class BBCompSep(PipelineStage):
             tr_names = sorted(list(self.s.tracers.keys()))
         else:
             tr_names = self.config['bands']
-            if self.delensing:
-                tr_names.append('temp')
         np.savez(self.get_output('output_dir')+'/cells_model.npz',
                  tracers=tr_names, 
                  ls=self.ell_b, 

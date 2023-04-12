@@ -1,24 +1,24 @@
 import numpy as np
 
-#Foreground model: reference values for Nicoletta's sims (obtained with inverse noise mask)
-A_sync_BB = 0. #1.6
+#Foreground model
+A_sync_BB = 2.0
 EB_sync = 2.
-alpha_sync_EE = -0.7
-alpha_sync_BB = -0.93
+alpha_sync_EE = -0.6
+alpha_sync_BB = -0.4
 beta_sync = -3.
 nu0_sync = 23.
 
-A_dust_BB = 0. #28.
+A_dust_BB = 5.0
 EB_dust = 2.
-alpha_dust_EE = -0.32
-alpha_dust_BB = -0.16
-beta_dust = 1.54
-temp_dust = 20.
+alpha_dust_EE = -0.42
+alpha_dust_BB = -0.2
+beta_dust = 1.59
+temp_dust = 19.6
 nu0_dust = 353.
 
 Alens = 1.0
 
-band_names = ['MF1', 'MF2', 'UHF1'] #['LF1', 'LF2', 'MF1', 'MF2', 'UHF1', 'UHF2']
+band_names = ['LF1', 'LF2', 'MF1', 'MF2', 'UHF1', 'UHF2']
 
 
 #CMB spectrum
@@ -86,8 +86,7 @@ def get_component_spectra(lmax):
     dls_sync_bb=dl_plaw(A_sync_BB,alpha_sync_BB,larr_all)
     dls_dust_ee=dl_plaw(A_dust_BB*EB_dust,alpha_dust_EE,larr_all)
     dls_dust_bb=dl_plaw(A_dust_BB,alpha_dust_BB,larr_all)
-    _,dls_cmb_ee,dls_cmb_bb,_=read_camb("/global/homes/e/emilie_h/Scripts/BB_temp_realistic/FFP10_files/FFP10_lensedCls.dat", lmax)
-    #_,dls_cmb_ee,dls_cmb_bb,_=read_camb("./examples/data/camb_lens_nobb.dat", lmax)
+    _,dls_cmb_ee,dls_cmb_bb,_=read_camb("./examples/data/camb_lens_nobb.dat", lmax)
     return (dls_sync_ee, dls_sync_bb,
             dls_dust_ee, dls_dust_bb,
             dls_cmb_ee, Alens*dls_cmb_bb)

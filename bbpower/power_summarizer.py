@@ -49,12 +49,7 @@ class BBPowerSummarizer(PipelineStage):
                                 'r').readlines())
         self.nbands = len(open(self.get_input('bandpasses_list'),
                                'r').readlines())
-        self.delensing = self.config['delensing']
-        self.n_channels_del = self.nbands+1
-        if self.delensing:
-            self.n_channels = self.n_channels_del
-        else:
-            self.n_channels = self.nbands
+
         # Compute all possible null combinations
         # Currently we compute these as (m_i-m_j) x (m_k-m_l)
         # where m_x is the set of maps for split x,
@@ -114,19 +109,14 @@ class BBPowerSummarizer(PipelineStage):
         bands = []
         splits = []
         for tn, t in s.tracers.items():
-            if tn != 'temp':
-                # If not template, tracer names are bandX_splitY
-                band, split = tn.split('_', 2)
-                bands.append(band)
-                splits.append(split)
+            # Tracer names are bandX_splitY
+            band, split = tn.split('_', 2)
+            bands.append(band)
+            splits.append(split)
         bands = np.unique(bands)
         splits = np.unique(splits)
-        if self.delensing:
-            ntracers = self.nbands*self.nsplits+1
-        else:
-            ntracers = self.nbands*self.nsplits
         if ((len(bands) != self.nbands) or (len(splits) != self.nsplits) or
-                (len(s.tracers) != ntracers)):
+                (len(s.tracers) != self.nbands*self.nsplits)):
             raise ValueError("There's something wrong with these SACC tracers")
         if self.n_bpws == 0:
             self.ells, _ = s.get_ell_cl(s.data[0].data_type,
@@ -135,6 +125,7 @@ class BBPowerSummarizer(PipelineStage):
             self.n_bpws = len(self.ells)
 
         # Total number of power spectra expected
+        ntracers = self.nbands * self.nsplits
         nmaps = 2*ntracers
         nxt_expected = (ntracers * (ntracers + 1)) // 2
         nx_expected = (nmaps * (nmaps + 1)) // 2
@@ -146,22 +137,11 @@ class BBPowerSummarizer(PipelineStage):
 
     def get_windows(self, s):
         self.windows = {}
-        for b1 in range(self.n_channels):
-            if b1 == self.n_channels_del-1:
-                n1 = 'temp'
-                nband1 = 'temp'
-            else:
-                n1 = 'band%d_split1' % (b1+1)
-                nband1 = 'band%d' % (b1+1)
-            for b2 in range(b1, self.n_channels):
-                if b2 == self.n_channels_del-1:
-                    n2 = 'temp'
-                    nband2 = 'temp'
-                else: # Only relevant case when delensing is off
-                    n2 = 'band%d_split1' % (b2+1)
-                    nband2 = 'band%d' % (b2+1)
-
-                xname = nband1+'_'+nband2
+        for b1 in range(self.nbands):
+            n1 = 'band%d_split1' % (b1+1)
+            for b2 in range(b1, self.nbands):
+                n2 = 'band%d_split1' % (b2+1)
+                xname = 'band%d_band%d' % (b1+1, b2+1)
                 self.windows[xname] = {}
                 _, _, ind = s.get_ell_cl('cl_ee', n1, n2, return_ind=True)
                 self.windows[xname]['ee'] = s.get_bandpower_windows(ind)
@@ -178,26 +158,18 @@ class BBPowerSummarizer(PipelineStage):
         """
         tracers_bands = {}
         for tn, t in s.tracers.items():
-            if tn != 'temp':
-                band, split = tn.split('_', 2)
-                if split == 'split1':
-                    T = sacc.BaseTracer.make('NuMap', band,
-                                             2, t.nu, t.bandpass,
-                                             t.ell, t.beam,
-                                             quantity='cmb_polarization',
-                                             bandpass_extra={'dnu': t.bandpass_extra['dnu']})
-                    tracers_bands[band] = T
-            else:
-                T = sacc.BaseTracer.make('Map', tn,
-                                         2, t.ell, t.beam,
-                                         quantity='cmb_polarization')
-                tracer_temp = T
+            band, split = tn.split('_', 2)
+            if split == 'split1':
+                T = sacc.BaseTracer.make('NuMap', band,
+                                         2, t.nu, t.bandpass,
+                                         t.ell, t.beam,
+                                         quantity='cmb_polarization',
+                                         bandpass_extra={'dnu': t.bandpass_extra['dnu']})
+                tracers_bands[band] = T
 
         self.t_coadd = []
         for i in range(self.nbands):
             self.t_coadd.append(tracers_bands['band%d' % (i+1)])
-        if self.delensing:
-            self.t_coadd.append(tracer_temp)
 
         self.t_nulls = []
         self.ind_nulls = {}
@@ -246,45 +218,6 @@ class BBPowerSummarizer(PipelineStage):
                             win = None
                         yield b1, ip1, b2, ip2, l1, l2, x, win
 
-    def band_temp_pol_iterator(self, with_windows=True): # When delensing is on, this iterates over band x template spectra
-        pols = ['e', 'b']
-        for b1 in range(self.nbands):
-            l1 = 'band%d' % (b1+1)
-            b2 = self.n_channels_del-1
-            l2 = 'temp'
-            for ip1 in range(2):
-                p2_range = range(2)
-                for ip2 in p2_range:
-                    x = pols[ip1] + pols[ip2]
-                    if with_windows:
-                        bname = l1+'_'+l2
-                        x_use = x
-                        win = self.windows[bname][x_use]
-                    else:
-                        win = None
-                    yield b1, ip1, b2, ip2, l1, l2, x, win
-
-    def temp_pol_iterator(self, half=True, with_windows=True): # When delensing is on, iterates over template x template spectra
-        pols = ['e', 'b']
-        b1 = self.n_channels_del-1
-        l1 = 'temp'
-        b2 = self.n_channels_del-1
-        l2 = 'temp'
-        for ip1 in range(2):
-            if half:
-                p2_range = range(ip1,2)
-            else:
-                p2_range = range(2)
-            for ip2 in p2_range:
-                x = pols[ip1] + pols[ip2]
-                if with_windows:
-                    bname = l1+'_'+l2
-                    x_use = x
-                    win = self.windows[bname][x_use]
-                else:
-                    win = None
-                yield b1, ip1, b2, ip2, l1, l2, x, win
-
     def bands_splits_pol_iterator(self):
         for b1 in range(self.nbands):
             for b2 in range(b1, self.nbands):
@@ -306,70 +239,22 @@ class BBPowerSummarizer(PipelineStage):
                                            self.pol_names[p2].lower())
                                 yield s1, s2, b1, b2, p1, p2, m1, m2, cl_name
 
-    def band_temp_splits_pol_iterator(self): # Iterate over SAT splits x template cross-spectra
-        for b1 in range(self.nbands):
-            b2 = self.n_channels_del-1
-            s2 = None
-            for s1 in range(self.nsplits):
-                for p1 in range(2):
-                    p2_range = range(2)
-                    for p2 in p2_range:
-                        m1 = p1 + 2 * (b1 + self.nbands * s1)
-                        m2 = p2
-                        cl_name = ('cl_' + self.pol_names[p1].lower() +
-                                    self.pol_names[p2].lower())
-                        yield s1, s2, b1, b2, p1, p2, m1, m2, cl_name
-
-    def temp_splits_pol_iterator(self): # Iterate over template spectra
-        b1 = self.n_channels_del-1
-        b2 = self.n_channels_del-1
-        s1 = None
-        s2 = None
-        for p1 in range(2):
-            p2_range = range(p1,2) # BE=EB
-            for p2 in p2_range:
-                m1 = p1
-                m2 = p2
-                cl_name = ('cl_' + self.pol_names[p1].lower() +
-                            self.pol_names[p2].lower())
-                yield s1, s2, b1, b2, p1, p2, m1, m2, cl_name
-
     def get_cl_indices(self, s):
-        self.BxB_inds = np.zeros([(self.nsplits * self.nbands) * 2,
-                              (self.nsplits * self.nbands) * 2,
+        self.inds = np.zeros([self.nsplits * self.nbands * 2,
+                              self.nsplits * self.nbands * 2,
                               self.n_bpws], dtype=int)
-        itr1 = self.bands_splits_pol_iterator()
-        for s1, s2, b1, b2, p1, p2, m1, m2, cltyp in itr1:
+
+        itr = self.bands_splits_pol_iterator()
+        for s1, s2, b1, b2, p1, p2, m1, m2, cltyp in itr:
             t1 = 'band%d_split%d' % (b1+1, s1+1)
             t2 = 'band%d_split%d' % (b2+1, s2+1)
             _, _, ind = s.get_ell_cl(cltyp, t1, t2, return_ind=True)
-            self.BxB_inds[m1, m2, :] = ind
+            self.inds[m1, m2, :] = ind
             if m1 != m2:
-                self.BxB_inds[m2, m1, :] = ind
-        self.BxB_inds = self.BxB_inds.flatten()
-        
-        if self.delensing:
-            self.BxTemp_inds = np.zeros([(self.nsplits * self.nbands) * 2, 2, self.n_bpws], dtype=int)
-            itr2 = self.band_temp_splits_pol_iterator()
-            for s1, s2, b1, b2, p1, p2, m1, m2, cltyp in itr2:
-                t1 = 'band%d_split%d' % (b1+1, s1+1)
-                t2 = 'temp'
-                _, _, ind = s.get_ell_cl(cltyp, t1, t2, return_ind=True)
-                self.BxTemp_inds[m1, m2, :] = ind
-            self.BxTemp_inds = self.BxTemp_inds.flatten()
+                self.inds[m2, m1, :] = ind
+        self.inds = self.inds.flatten()
 
-            self.TempxTemp_inds = np.zeros([2, 2, self.n_bpws], dtype=int)
-            itr3 = self.temp_splits_pol_iterator()
-            for s1, s2, b1, b2, p1, p2, m1, m2, cltyp in itr3:
-                t1 = 'temp'
-                t2 = 'temp'
-                _, _, ind = s.get_ell_cl(cltyp, t1, t2, return_ind=True)
-                self.TempxTemp_inds[m1, m2, :] = ind
-                if m1 != m2:
-                    self.TempxTemp_inds[m2, m1, :] = ind
-            self.TempxTemp_inds = self.TempxTemp_inds.flatten()
-
-    def parse_splits_sacc_file(self, s, get_saccs=True, with_windows=False):
+    def parse_splits_sacc_file(self, s, get_saccs=False, with_windows=False):
         """
         Transform a SACC file containing splits into 4 SACC vectors:
         1 that contains the coadded power spectra.
@@ -388,7 +273,7 @@ class BBPowerSummarizer(PipelineStage):
         # simplifies bookkeeping significantly.
 
         # Put it in shape [nsplits,nsplits,nbands,2,nbands,2,nl]
-        BxB_spectra = np.transpose(s.mean[self.BxB_inds].reshape([self.nsplits,
+        spectra = np.transpose(s.mean[self.inds].reshape([self.nsplits,
                                                           self.nbands, 2,
                                                           self.nsplits,
                                                           self.nbands, 2,
@@ -398,28 +283,18 @@ class BBPowerSummarizer(PipelineStage):
         # Coadding (assuming flat coadding)
         # Total coadding (including diagonal)
         weights_total = np.ones(self.nsplits, dtype=float)/self.nsplits
-        BxB_spectra_total = np.einsum('i,ijklmno,j',
+        spectra_total = np.einsum('i,ijklmno,j',
                                   weights_total,
-                                  BxB_spectra,
+                                  spectra,
                                   weights_total)
 
         # Off-diagonal coadding
-        triu_mean = np.mean(BxB_spectra[np.triu_indices(self.nsplits, 1)], axis=0)
-        tril_mean = np.mean(BxB_spectra[np.tril_indices(self.nsplits, -1)], axis=0)
-        BxB_spectra_xcorr = 0.5*(tril_mean+triu_mean)
-        
+        triu_mean = np.mean(spectra[np.triu_indices(self.nsplits, 1)], axis=0)
+        tril_mean = np.mean(spectra[np.tril_indices(self.nsplits, -1)], axis=0)
+        spectra_xcorr = 0.5*(tril_mean+triu_mean)
+
         # Noise power spectra
-        BxB_spectra_noise = BxB_spectra_total - BxB_spectra_xcorr
-
-        if self.delensing:
-            BxTemp_spectra = s.mean[self.BxTemp_inds].reshape([self.nsplits, self.nbands, 2, 2, self.n_bpws])
-            BxTemp_spectra_total = np.einsum('i,ijklm', weights_total, BxTemp_spectra)
-            BxTemp_spectra_xcorr = BxTemp_spectra_total
-            BxTemp_spectra_noise = BxTemp_spectra_total - BxTemp_spectra_xcorr
-
-            TempxTemp_spectra_total = s.mean[self.TempxTemp_inds].reshape([2, 2, self.n_bpws])
-            TempxTemp_spectra_xcorr = TempxTemp_spectra_total
-            TempxTemp_spectra_noise = TempxTemp_spectra_total - TempxTemp_spectra_xcorr
+        spectra_noise = spectra_total - spectra_xcorr
 
         # Nulls
         spectra_nulls = np.zeros([self.n_nulls,
@@ -427,8 +302,8 @@ class BBPowerSummarizer(PipelineStage):
                                   self.nbands, 2,
                                   self.n_bpws])
         for i_null, (i, j, k, l) in enumerate(self.pairings):
-            spectra_nulls[i_null] = (BxB_spectra[i, k]-BxB_spectra[i, l] -
-                                     BxB_spectra[j, k]+BxB_spectra[j, l])
+            spectra_nulls[i_null] = (spectra[i, k]-spectra[i, l] -
+                                     spectra[j, k]+spectra[j, l])
 
         ret = {}
         if get_saccs:
@@ -444,52 +319,21 @@ class BBPowerSummarizer(PipelineStage):
             for t in self.t_nulls:
                 s_nulls.add_tracer_object(t)
 
-            itr = self.bands_pol_iterator(half=True,with_windows=with_windows)
+            itr = self.bands_pol_iterator(half=True,
+                                          with_windows=with_windows)
             for b1, ip1, b2, ip2, l1, l2, x, win in itr:
                 s_total.add_ell_cl('cl_' + x, l1, l2,
                                    self.ells,
-                                   BxB_spectra_total[b1, ip1, b2, ip2],
+                                   spectra_total[b1, ip1, b2, ip2],
                                    window=win)
                 s_xcorr.add_ell_cl('cl_' + x, l1, l2,
                                    self.ells,
-                                   BxB_spectra_xcorr[b1, ip1, b2, ip2],
+                                   spectra_xcorr[b1, ip1, b2, ip2],
                                    window=win)
                 s_noise.add_ell_cl('cl_' + x, l1, l2,
                                    self.ells,
-                                   BxB_spectra_noise[b1, ip1, b2, ip2],
+                                   spectra_noise[b1, ip1, b2, ip2],
                                    window=win)
-
-            if self.delensing:
-                itr2 = self.band_temp_pol_iterator(with_windows=with_windows)
-                for b1, ip1, b2, ip2, l1, l2, x, win in itr2:
-                    s_total.add_ell_cl('cl_' + x, l1, l2,
-                                       self.ells,
-                                       BxTemp_spectra_total[b1, ip1, ip2],
-                                       window=win)
-                    s_xcorr.add_ell_cl('cl_' + x, l1, l2,
-                                       self.ells,
-                                       BxTemp_spectra_xcorr[b1, ip1, ip2],
-                                       window=win)
-                    s_noise.add_ell_cl('cl_' + x, l1, l2,
-                                       self.ells,
-                                       BxTemp_spectra_noise[b1, ip1, ip2],
-                                       window=win)
-
-                itr3 = self.temp_pol_iterator(half=True, with_windows=with_windows)
-                for b1, ip1, b2, ip2, l1, l2, x, win in itr3:
-                    s_total.add_ell_cl('cl_' + x, l1, l2,
-                                       self.ells,
-                                       TempxTemp_spectra_total[ip1, ip2],
-                                       window=win)
-                    s_xcorr.add_ell_cl('cl_' + x, l1, l2,
-                                       self.ells,
-                                       TempxTemp_spectra_xcorr[ip1, ip2],
-                                       window=win)
-                    s_noise.add_ell_cl('cl_' + x, l1, l2,
-                                       self.ells,
-                                       TempxTemp_spectra_noise[ip1, ip2],
-                                       window=win)
-
             for i_null, (i, j, k, l) in enumerate(self.pairings):
                 itrb = self.bands_pol_iterator(half=False,
                                                with_windows=with_windows)
@@ -502,12 +346,10 @@ class BBPowerSummarizer(PipelineStage):
                                        window=win)
             ret['saccs'] = [s_total, s_xcorr, s_noise, s_nulls]
 
-        # We use this to order the spectra correctly => the function only works if get_saccs = True => changed default to True
-        spectra_total = s_total.mean
-        spectra_xcorr = s_xcorr.mean
-        spectra_noise = s_noise.mean
+        spectra_total = spectra_total.reshape([2*self.nbands, 2*self.nbands, self.n_bpws])[np.triu_indices(2*self.nbands)].flatten()
+        spectra_xcorr = spectra_xcorr.reshape([2*self.nbands, 2*self.nbands, self.n_bpws])[np.triu_indices(2*self.nbands)].flatten()
+        spectra_noise = spectra_noise.reshape([2*self.nbands, 2*self.nbands, self.n_bpws])[np.triu_indices(2*self.nbands)].flatten()
         spectra_nulls = spectra_nulls.reshape([-1, self.n_bpws]).flatten()
-
         ret['spectra'] = [spectra_total, spectra_xcorr, spectra_noise, spectra_nulls]
 
         return ret
@@ -548,8 +390,6 @@ class BBPowerSummarizer(PipelineStage):
             sim_cd_n[i, :] = sb['spectra'][2]
             sim_null[i, :] = sb['spectra'][3]
 
-        sim_spectra_mean = np.mean(sim_cd_x,axis=0) # Average off-diagonal coadded spectra over all sims (useful to check that spectra aren't biased)
-
         # Compute covariance
         print("Covariances")
         dctyp = self.config['data_covar_type']
@@ -581,11 +421,6 @@ class BBPowerSummarizer(PipelineStage):
         summ['saccs'][3].save_fits(self.get_output("cells_null"),
                                    overwrite=True)
 
-        print('Saving mean sims spectra')
-        summ['saccs'][1].mean = sim_spectra_mean
-        mean_dir = self.get_output("cells_coadded").rsplit('/',1)[0]
-        print('Directory: ',mean_dir)
-        summ['saccs'][1].save_fits(mean_dir+'/cells_mean_sims.fits', overwrite=True)
 
 if __name__ == '__main_':
     cls = PipelineStage.main()
