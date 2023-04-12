@@ -18,4 +18,3 @@ First of all, have a look at the BBPipe documentation to get a broad idea of how
 
 ### Credits and questions
 Get in touch with Max Abitbol (mabitbol), David Alonso (damonge) or anyone else in the SO BB AWG if you have questions or queries about the code.
-
