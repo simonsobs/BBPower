@@ -4,19 +4,25 @@ import noise_calc as nc
 import sacc
 import sys
 
-
 prefix_out = sys.argv[1]
+if sys.argv[2] == 'delensing':
+    delensing = True 
+    print('With delensing')
+else:
+    delensing = False
+    print('Without delensing')
 
 # Bandpasses
-bpss = {n: Bpass(n,f'examples/data/bandpasses/{n}.txt') for n in band_names}
+bpss = {n: Bpass(n,f'/pscratch/sd/e/emilie_h/BBPower_vdef_tests/Input_files/nofg_goal/Delta_bandpasses/{n}.txt') for n in band_names}
+#bpss = {n: Bpass(n,f'examples/data/bandpasses/{n}.txt') for n in band_names}
 
 # Bandpowers
 dell = 10
-nbands = 100
+nbands = 30
 lmax = 2+nbands*dell
 larr_all = np.arange(lmax+1)
 lbands = np.linspace(2,lmax,nbands+1,dtype=int)
-leff = 0.5*(lbands[1:]+lbands[:-1])
+leff = 0.5*(lbands[1:]+lbands[:-1]-1)
 windows = np.zeros([nbands,lmax+1])
 cl2dl=larr_all*(larr_all+1)/(2*np.pi)
 dl2cl=np.zeros_like(cl2dl)
@@ -27,11 +33,11 @@ for b,(l0,lf) in enumerate(zip(lbands[:-1],lbands[1:])):
 s_wins = sacc.BandpowerWindow(larr_all, windows.T)
 
 # Beams
-beams = {band_names[i]: b for i, b in enumerate(nc.Simons_Observatory_V3_SA_beams(larr_all))}
+beams = {band_names[i]: b for i, b in enumerate(nc.Simons_Observatory_V3_SA_beams(larr_all)[2:5])} # Add [2:5] for 3 channels only
 
 print("Calculating power spectra")
 # Component spectra
-dls_comp=np.zeros([3,2,3,2,lmax+1]) #[ncomp,np,ncomp,np,nl]
+dls_comp=np.zeros([3,2,3,2,lmax+1]) #[ncomp,npol,ncomp,npol,nl]
 (dls_comp[1,0,1,0,:],
  dls_comp[1,1,1,1,:],
  dls_comp[2,0,2,0,:],
@@ -56,7 +62,8 @@ knee=1
 ylf=1
 fsky=0.1
 nell=np.zeros([nfreqs,lmax+1])
-_,nell[:,2:],_=nc.Simons_Observatory_V3_SA_noise(sens,knee,ylf,fsky,lmax+1,1)
+nell[:,2:]=nc.Simons_Observatory_V3_SA_noise(sens,knee,ylf,fsky,lmax+1,1)[1][2:5] # For 3 channels only
+#_,nell[:,2:],_=nc.Simons_Observatory_V3_SA_noise(sens,knee,ylf,fsky,lmax+1,1)
 n_bpw=np.sum(nell[:,None,:]*windows[None,:,:],axis=2)
 bpw_freq_noi=np.zeros_like(bpw_freq_sig)
 for ib,n in enumerate(n_bpw):
@@ -90,8 +97,16 @@ for ib, n in enumerate(band_names):
                      nu_unit='GHz',
                      map_unit='uK_CMB')
 
+if delensing:
+    s_f.add_tracer('Map', 'temp',
+                    quantity='cmb_polarization',
+                    spin=2,
+                    ell=larr_all,
+                    beam=np.ones(len(larr_all)),
+                    map_unit='uK_CMB')
+
 # Adding power spectra
-print("Adding spectra")
+print("Adding SAT channels spectra")
 nmaps=2*nfreqs
 ncross=(nmaps*(nmaps+1))//2
 indices_tr=np.triu_indices(nmaps)
@@ -105,24 +120,45 @@ for ii, (i1, i2) in enumerate(zip(indices_tr[0], indices_tr[1])):
     p1 = map_names[i1][-1].lower()
     p2 = map_names[i2][-1].lower()
     cl_type = f'cl_{p1}{p2}'
-    s_d.add_ell_cl(cl_type, n1, n2, leff, bpw_freq_sig[i1, i2, :], window=s_wins)
+    #s_d.add_ell_cl(cl_type, n1, n2, leff, bpw_freq_sig[i1, i2, :], window=s_wins)
     s_f.add_ell_cl(cl_type, n1, n2, leff, bpw_freq_sig[i1, i2, :], window=s_wins)
-    s_n.add_ell_cl(cl_type, n1, n2, leff, bpw_freq_noi[i1, i2, :], window=s_wins)
+    #s_n.add_ell_cl(cl_type, n1, n2, leff, bpw_freq_noi[i1, i2, :], window=s_wins)
+
+if delensing:
+    print("Loading analytical template")
+    temp_file = np.loadtxt('/pscratch/sd/e/emilie_h/BBPower_vdef_tests/Input_files/nofg_goal/Temp_comb_goal_analytic_blake_smooth_overlap.dat')
+    temp_ells = temp_file[:,0]
+    mask = (temp_ells <= lmax)
+    temp_BB = temp_file[:,1][mask]*dl2cl
+    ana_temp_bin = np.sum(temp_BB[None,:]*windows[:,:],axis=1)
+
+    print("Adding template cross-spectra")
+    for ib, n in enumerate(band_names):
+        n1 = 'band%d' % (ib+1)
+        s_f.add_ell_cl('cl_ee', n1, 'temp', leff, np.zeros(len(ana_temp_bin)), window=s_wins)
+        s_f.add_ell_cl('cl_eb', n1, 'temp', leff, np.zeros(len(ana_temp_bin)), window=s_wins)
+        s_f.add_ell_cl('cl_be', n1, 'temp', leff, np.zeros(len(ana_temp_bin)), window=s_wins)
+        s_f.add_ell_cl('cl_bb', n1, 'temp', leff, ana_temp_bin, window=s_wins)
+
+    print("Adding template auto-spectra")
+    s_f.add_ell_cl('cl_ee', 'temp', 'temp', leff, np.zeros(len(ana_temp_bin)), window=s_wins)
+    s_f.add_ell_cl('cl_eb', 'temp', 'temp', leff, np.zeros(len(ana_temp_bin)), window=s_wins)
+    s_f.add_ell_cl('cl_bb', 'temp', 'temp', leff, ana_temp_bin, window=s_wins)
 
 # Add covariance
-print("Adding covariance")
-cov_bpw = np.zeros([ncross, nbands, ncross, nbands])
-factor_modecount = 1./((2*leff+1)*dell*fsky)
-for ii, (i1, i2) in enumerate(zip(indices_tr[0], indices_tr[1])):
-    for jj, (j1, j2) in enumerate(zip(indices_tr[0], indices_tr[1])):
-        covar = (bpw_freq_tot[i1, j1, :]*bpw_freq_tot[i2, j2, :]+
-                 bpw_freq_tot[i1, j2, :]*bpw_freq_tot[i2, j1, :]) * factor_modecount
-        cov_bpw[ii, :, jj, :] = np.diag(covar)
-cov_bpw = cov_bpw.reshape([ncross * nbands, ncross * nbands])
-s_d.add_covariance(cov_bpw)
+#print("Adding covariance")
+#cov_bpw = np.zeros([ncross, nbands, ncross, nbands])
+#factor_modecount = 1./((2*leff+1)*dell*fsky)
+#for ii, (i1, i2) in enumerate(zip(indices_tr[0], indices_tr[1])):
+#    for jj, (j1, j2) in enumerate(zip(indices_tr[0], indices_tr[1])):
+#        covar = (bpw_freq_tot[i1, j1, :]*bpw_freq_tot[i2, j2, :]+
+#                 bpw_freq_tot[i1, j2, :]*bpw_freq_tot[i2, j1, :]) * factor_modecount
+#        cov_bpw[ii, :, jj, :] = np.diag(covar)
+#cov_bpw = cov_bpw.reshape([ncross * nbands, ncross * nbands])
+#s_d.add_covariance(cov_bpw)
 
 # Write output
 print("Writing")
-s_d.save_fits(prefix_out + "/cls_coadd.fits", overwrite=True)
-s_f.save_fits(prefix_out + "/cls_fid.fits", overwrite=True)
-s_n.save_fits(prefix_out + "/cls_noise.fits", overwrite=True)
+#s_d.save_fits(prefix_out + "/cls_coadd.fits", overwrite=True)
+s_f.save_fits(prefix_out + "/cells_fiducial.fits", overwrite=True)
+#s_n.save_fits(prefix_out + "/cls_noise.fits", overwrite=True)

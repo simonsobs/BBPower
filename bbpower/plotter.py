@@ -50,8 +50,9 @@ class BBPlotter(PipelineStage):
             plt.figure()
             plt.title(title,fontsize=14)
             for n, t in self.s_fid.tracers.items():
-                nu_mean=np.sum(t.bandpass*t.nu**3)/np.sum(t.bandpass*t.nu**2)
-                plt.plot(t.nu,t.bandpass/np.amax(t.bandpass),label=n+', $\\langle\\nu\\rangle=%.1lf\\,{\\rm GHz}$'%nu_mean)
+                if n != 'temp':
+                    nu_mean=np.sum(t.bandpass*t.nu**3)/np.sum(t.bandpass*t.nu**2)
+                    plt.plot(t.nu,t.bandpass/np.amax(t.bandpass),label=n+', $\\langle\\nu\\rangle=%.1lf\\,{\\rm GHz}$'%nu_mean)
             plt.xlabel('$\\nu\\,[{\\rm GHz}]$',fontsize=14)
             plt.ylabel('Transmission',fontsize=14)
             plt.ylim([0.,1.3])
@@ -62,33 +63,33 @@ class BBPlotter(PipelineStage):
             lst+=dtg.li(dtg.a(title,href=fname))
 
             for n, t in self.s_fid.tracers.items():
-                title='Bandpass '+n
-                fname=self.get_output('plots')+'/bpass_'+n+'.png'
-                plt.figure()
-                plt.title(title,fontsize=14)
-                plt.plot(t.nu,t.bandpass/np.amax(t.bandpass))
-                plt.xlabel('$\\nu\\,[{\\rm GHz}]$',fontsize=14)
-                plt.ylabel('Transmission',fontsize=14)
-                plt.ylim([0.,1.05])
-                plt.savefig(fname,bbox_inches='tight')
-                plt.close()
-                lst+=dtg.li(dtg.a(title,href=fname))
+                if n != 'temp':
+                    title='Bandpass '+n
+                    fname=self.get_output('plots')+'/bpass_'+n+'.png'
+                    plt.figure()
+                    plt.title(title,fontsize=14)
+                    plt.plot(t.nu,t.bandpass/np.amax(t.bandpass))
+                    plt.xlabel('$\\nu\\,[{\\rm GHz}]$',fontsize=14)
+                    plt.ylabel('Transmission',fontsize=14)
+                    plt.ylim([0.,1.05])
+                    plt.savefig(fname,bbox_inches='tight')
+                    plt.close()
+                    lst+=dtg.li(dtg.a(title,href=fname))
             dtg.div(dtg.a('Back to TOC',href='#contents'))
 
     def add_coadded(self):
         with self.doc:
             dtg.h2("Coadded power spectra",id='coadded')
             lst=dtg.ul()
-            pols = ['e', 'b']
             print(self.s_fid.tracers)
             for t1, t2 in self.s_cd_x.get_tracer_combinations():
-                for p1 in range(2):
+                for p1 in range(self.npols):
                     if t1==t2:
-                        p2range = range(p1, 2)
+                        p2range = range(p1, self.npols)
                     else:
-                        p2range = range(2)
+                        p2range = range(self.npols)
                     for p2 in p2range:
-                        x = pols[p1] + pols[p2]
+                        x = self.pols[p1] + self.pols[p2]
                         typ = 'cl_' + x
                         # Plot title
                         title = f"{t1} x {t2}, {typ}"
@@ -123,6 +124,7 @@ class BBPlotter(PipelineStage):
                                      label='Cross-coadd')
                         eb=plt.errorbar(l[msk]+1, -cl[msk], yerr=el, fmt='bo', mfc='white')
                         eb[-1][0].set_linestyle('--')
+                        plt.xlim([min(l[msk]),max(l[msk])])
                         plt.yscale('log')
                         plt.xlabel('$\\ell$',fontsize=15)
                         if self.config['compute_dell']:
@@ -141,7 +143,6 @@ class BBPlotter(PipelineStage):
             dtg.h2("Null tests",id='nulls')
             lst=dtg.ul()
 
-            pols = ['e', 'b']
             for t1, t2 in self.s_null.get_tracer_combinations():
                 title = f"{t1} x {t2}"
                 fname =self.get_output('plots')+'/cls_null_'
@@ -149,9 +150,9 @@ class BBPlotter(PipelineStage):
                 print(fname)
                 plt.figure()
                 plt.title(title,fontsize=15)
-                for p1 in range(2):
-                    for p2 in range(2):
-                        x = pols[p1] + pols[p2]
+                for p1 in range(self.npols):
+                    for p2 in range(self.npols):
+                        x = self.pols[p1] + self.pols[p2]
                         typ='cl_'+x
                         l, cl, cv = self.s_null.get_ell_cl(typ, t1, t2, return_cov=True)
                         msk = l<self.lmx
@@ -183,22 +184,26 @@ class BBPlotter(PipelineStage):
                     'epsilon_ds':'\\epsilon_{ds}',
                     'alpha_d_bb':'\\alpha_d',
                     'amp_d_bb':'A_d',
+                    'amp_d_beta':'B_d',
+                    'gamma_d_beta':'\\gamma_d',
                     'beta_s':'\\beta_s',
                     'alpha_s_bb':'\\alpha_s',
-                    'amp_s_bb':'A_s'}
+                    'amp_s_bb':'A_s',
+                    'amp_s_beta':'B_s',
+                    'gamma_s_beta':'\\gamma_s'}
             # TODO: we need to build this from the priors, I think.
             truth={'A_lens':1.,
                    'r_tensor':0.,
-                   'beta_d':1.59,
+                   'beta_d':1.54,
                    'epsilon_ds':0.,
-                   'alpha_d_bb':-0.2,
-                   'amp_d_bb':5.,
+                   'alpha_d_bb':-0.16,
+                   'amp_d_bb':28.,
                    'beta_s':-3.,
-                   'alpha_s_bb':-0.4,
-                   'amp_s_bb':2.}
+                   'alpha_s_bb':-0.93,
+                   'amp_s_bb':1.6}
 
             # Select only parameters for which we have labels
-            names_common=list(set(list(self.chain['names'])) & truth.keys())
+            names_common=list(set(list(self.chain['names'])) & labdir.keys())
             msk_common=np.array([n in names_common for n in self.chain['names']])
             npar=len(names_common)
             nwalk,nsamp,npar_chain=self.chain['chain'].shape
@@ -212,11 +217,13 @@ class BBPlotter(PipelineStage):
             g = gplots.getSubplotPlotter()
             g.triangle_plot([samples], filled=True)
             for i,n in enumerate(names_common):
-                v=truth[n]
-                g.subplots[i,i].plot([v,v],[0,1],'r-')
-                for j in range(i+1,npar):
-                    u=truth[names_common[j]]
-                    g.subplots[j,i].plot([v],[u],'ro')
+                if n in truth.keys():
+                    v=truth[n]
+                    g.subplots[i,i].plot([v,v],[0,1],'r-')
+                    for j in range(i+1,npar):
+                        if names_common[j] in truth.keys():
+                            u=truth[names_common[j]]
+                            g.subplots[j,i].plot([v],[u],'ro')
 
             # Save
             fname=self.get_output('plots')+'/triangle.png'
@@ -244,6 +251,8 @@ class BBPlotter(PipelineStage):
         if self.config['plot_likelihood']:
             self.chain=np.load(self.get_input('param_chains'))
 
+        self.pols = self.config['pol_channels']
+        self.npols = len(self.pols)
         self.cols_typ={'ee':'r','eb':'g','be':'y','bb':'b'}
         self.lmx = self.config['lmax_plot']
 
