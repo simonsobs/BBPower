@@ -285,8 +285,9 @@ class BBCompSep(PipelineStage):
 
             if comp['decorr']:
                 d_amp = params[comp['decorr_param_names']['decorr_amp']]
-                d_nu0 = params[comp['decorr_param_names']['decorr_nu0']]
-                decorr_delta = d_amp**(1./np.log(d_nu0)**2)
+                d_nu01 = params[comp['decorr_param_names']['decorr_nu01']]
+                d_nu02 = params[comp['decorr_param_names']['decorr_nu02']]
+                decorr_delta = d_amp**(1./np.log(d_nu01/d_nu02)**2)
                 for f1 in range(self.nfreqs):
                     for f2 in range(f1, self.nfreqs):
                         sed_12 = decorrelated_bpass(self.bpss[f1],
