@@ -285,8 +285,9 @@ class BBCompSep(PipelineStage):
 
             if comp['decorr']:
                 d_amp = params[comp['decorr_param_names']['decorr_amp']]
-                d_nu0 = params[comp['decorr_param_names']['decorr_nu0']]
-                decorr_delta = d_amp**(1./np.log(d_nu0)**2)
+                d_nu01 = params[comp['decorr_param_names']['decorr_nu01']]
+                d_nu02 = params[comp['decorr_param_names']['decorr_nu02']]
+                decorr_delta = d_amp**(1./np.log(d_nu01/d_nu02)**2)
                 for f1 in range(self.nfreqs):
                     for f2 in range(f1, self.nfreqs):
                         sed_12 = decorrelated_bpass(self.bpss[f1],
@@ -745,23 +746,49 @@ class BBCompSep(PipelineStage):
 
         return end-start, (end-start)/n_eval
     
-    def predicted_spectra(self):
+    def predicted_spectra(self, at_min=True, save_npz=True):
         """
         Evaluates model at a the maximum likelihood and 
         writes predicted spectra into a numpy array 
         with shape (nbpws, nmaps, nmaps).
         """
-        sampler = self.minimizer()
-        p = np.array(sampler)
-        model_cls = self.model(self.params.build_params(p))
+        if at_min:
+            sampler = self.minimizer()
+            p = np.array(sampler)
+        else:
+            p = self.params.p0
+        pars = self.params.build_params(p)
+        print(pars)
+        model_cls = self.model(pars)
         if self.config['bands'] == 'all':
             tr_names = sorted(list(self.s.tracers.keys()))
         else:
             tr_names = self.config['bands']
-        np.savez(self.get_output('output_dir')+'/cells_model.npz',
-                 tracers=tr_names, 
-                 ls=self.ell_b, 
-                 dls=model_cls)
+        if save_npz:
+            np.savez(self.get_output('output_dir')+'/cells_model.npz',
+                     tracers=tr_names, 
+                     ls=self.ell_b,
+                     dls=model_cls)
+            return
+        s = sacc.Sacc()
+        for it, tn in enumerate(tr_names):
+            t = self.s.tracers[tn]
+            s.add_tracer('NuMap', tn, quantity='cmb_polarization',
+                         spin=2, nu=t.nu, bandpass=t.bandpass,
+                         ell=t.ell, beam=t.beam, nu_unit='GHz',
+                         map_unit='uK_CMB')
+        for b1, b2, p1, p2, m1, m2, ind in self._freq_pol_iterator():
+            cl = model_cls[:, m1, m2]
+            t1 = tr_names[b1]
+            t2 = tr_names[b2]
+            pol1 = self.pols[p1].lower()
+            pol2 = self.pols[p2].lower()
+            cltyp = f'cl_{pol1}{pol2}'
+            win = sacc.BandpowerWindow(self.bpw_l, self.windows[ind].T)
+            s.add_ell_cl(cltyp, t1, t2, self.ell_b, cl, window=win)
+        s.add_covariance(self.bbcovar)
+        s.save_fits(self.get_output('output_dir')+'/cells_model.fits',
+                    overwrite=True)
         
         return
 
@@ -812,7 +839,9 @@ class BBCompSep(PipelineStage):
             print("Total time:", sampler[0])
             print("Time per eval:", sampler[1])
         elif self.config.get('sampler')=='predicted_spectra':
-            sampler = self.predicted_spectra()
+            at_min = self.config.get('predict_at_minimum', True)
+            save_npz = not self.config.get('predict_to_sacc', False)
+            sampler = self.predicted_spectra(at_min=at_min, save_npz=save_npz)
             print("Predicted spectra saved")
         else:
             raise ValueError("Unknown sampler")
