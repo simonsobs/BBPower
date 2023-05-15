@@ -20,7 +20,8 @@ class BBCompSep(PipelineStage):
     name = "BBCompSep"
     inputs = [('cells_coadded', FitsFile),
               ('cells_noise', FitsFile),
-              ('cells_fiducial', FitsFile)]
+              ('cells_fiducial', FitsFile),
+              ('cells_coadded_cov', FitsFile)]
     outputs = [('output_dir', DirFile),
                ('config_copy', YamlFile)]
     config_options = {'likelihood_type': 'h&l', 'n_iters': 32,
@@ -112,6 +113,12 @@ class BBCompSep(PipelineStage):
 
         # Read data
         self.s = sacc.Sacc.load_fits(self.get_input('cells_coadded'))
+        self.s_cov = sacc.Sacc.load_fits(self.get_input('cells_coadded_cov'))
+        tr_comb = self.s.get_tracer_combinations()
+        for tr1, tr2 in tr_comb:
+            ind1 = self.s.indices(data_type='cl_bb', tracers=(tr1, tr2))
+            ind2 = self.s_cov.indices(data_type='cl_bb', tracers=(tr1, tr2))
+            assert np.all(ind1 == ind2), "Covariance sacc ordering is wrong"
         if self.use_handl:
             s_fid = sacc.Sacc.load_fits(self.get_input('cells_fiducial'))
             s_noi = sacc.Sacc.load_fits(self.get_input('cells_noise'))
@@ -127,6 +134,7 @@ class BBCompSep(PipelineStage):
         for c in corr_all:
             if c not in corr_keep:
                 self.s.remove_selection(c)
+                self.s_cov.remove_selection(c)
                 if self.use_handl:
                     s_fid.remove_selection(c)
                     s_noi.remove_selection(c)
@@ -134,6 +142,8 @@ class BBCompSep(PipelineStage):
         # Scale cuts
         self.s.remove_selection(ell__gt=self.config['l_max'])
         self.s.remove_selection(ell__lt=self.config['l_min'])
+        self.s_cov.remove_selection(ell__gt=self.config['l_max'])
+        self.s_cov.remove_selection(ell__lt=self.config['l_min'])
         if self.use_handl:
             s_fid.remove_selection(ell__gt=self.config['l_max'])
             s_fid.remove_selection(ell__lt=self.config['l_min'])
@@ -179,7 +189,7 @@ class BBCompSep(PipelineStage):
 
         # Get power spectra and covariances
         if self.config['bands'] == 'all':
-            if not (self.s.covariance.covmat.shape[-1] == len(self.s.mean) == self.n_bpws * self.ncross):
+            if not (self.s_cov.covariance.covmat.shape[-1] == len(self.s.mean) == self.n_bpws * self.ncross):
                 raise ValueError("C_ell vector's size is wrong")
 
         v2d = np.zeros([self.n_bpws, self.ncross])
@@ -217,7 +227,7 @@ class BBCompSep(PipelineStage):
                 pol2b = self.pols[p2b].lower()
                 cl_typb = f'cl_{pol1b}{pol2b}'
                 ind_b = self.s.indices(cl_typb, (t1b, t2b))
-                cv2d[:, ind_vec, :, ind_vecb] = self.s.covariance.covmat[ind_a][:, ind_b]
+                cv2d[:, ind_vec, :, ind_vecb] = self.s_cov.covariance.covmat[ind_a][:, ind_b]
 
         # Store data
         self.bbdata = self.vector_to_matrix(v2d)
