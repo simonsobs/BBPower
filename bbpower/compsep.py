@@ -334,10 +334,19 @@ class BBCompSep(PipelineStage):
         Defines the total model and integrates over
         the bandpasses and windows.
         """
-        # [npol,npol,nell]
-        cmb_cell = (params['r_tensor'] * self.cmb_tens +
-                    params['A_lens'] * self.cmb_lens +
-                    self.cmb_scal) * self.dl2cl
+        if self.config['cmb_model'].get('use_ellwise'):
+            cmb_amps = np.asarray([params[f'A_cmb_{str(i).zfill(2)}'] \
+                                   for i in range(1, self.n_bpws+1)])
+            delta_ell = np.mean(np.diff(self.ell_b))
+            cmb_amps_ell = np.dot(cmb_amps, self.windows[0,:,:]) * delta_ell * self.dl2cl
+            
+            # [npol,npol,nell]
+            cmb_cell = (cmb_amps_ell * self.cmb_lens + self.cmb_scal) * self.dl2cl
+        else:
+            # [npol,npol,nell]
+            cmb_cell = (params['r_tensor'] * self.cmb_tens +
+                        params['A_lens'] * self.cmb_lens +
+                        self.cmb_scal) * self.dl2cl
         # [nell,npol,npol]
         cmb_cell = np.transpose(cmb_cell, axes=[2, 0, 1])
         if self.config['cmb_model'].get('use_birefringence'):
@@ -611,8 +620,10 @@ class BBCompSep(PipelineStage):
         """
         import emcee
         from multiprocessing import Pool
-
-        fname_temp = self.get_output('output_dir')+'/emcee.npz.h5'
+        if self.config['cmb_model'].get('use_ellwise'):
+            fname_temp = self.get_output('output_dir')+'/emcee_ellwise.npz.h5'
+        else:
+            fname_temp = self.get_output('output_dir')+'/emcee.npz.h5'
         backend = emcee.backends.HDFBackend(fname_temp)
 
         nwalkers = self.config['nwalkers']
@@ -643,7 +654,7 @@ class BBCompSep(PipelineStage):
                                             backend=backend)
             if nsteps_use > 0:
                 sampler.run_mcmc(pos, nsteps_use, store=True, progress=False)
-                end = time.time()
+            end = time.time()
 
         return sampler, end-start
 
@@ -674,7 +685,10 @@ class BBCompSep(PipelineStage):
             print("Last dead point:", dead[-1])
 
         settings = PolyChordSettings(ndim, nder)
-        settings.base_dir = self.get_output('output_dir')+'/polychord'
+        if self.config['cmb_model'].get('use_ellwise'):
+            settings.base_dir = self.get_output('output_dir')+'/polychord_ellwise'
+        else:
+            settings.base_dir = self.get_output('output_dir')+'/polychord'
         settings.file_root = 'pch'
         settings.nlive = self.config['nlive']
         settings.num_repeats = self.config['nrepeat']
@@ -685,10 +699,13 @@ class BBCompSep(PipelineStage):
         settings.read_resume = False   # Read from resume file of earlier run
         settings.feedback = 2          # Verbosity {0,1,2,3}
 
+        import time
+        start = time.time()
         output = pypolychord.run_polychord(likelihood, ndim, nder, settings, 
                                            prior, dumper)
+        end = time.time()
 
-        return output
+        return output, end-start
 
     def minimizer(self):
         """
@@ -796,7 +813,24 @@ class BBCompSep(PipelineStage):
         from shutil import copyfile
         copyfile(self.get_input('config'), self.get_output('config_copy'))
         self.setup_compsep()
+        if self.config['cmb_model'].get('use_ellwise'):
+            if self.config.get('sampler') == 'emcee':
+                print('Running compsep: ellwise CMB (emcee)')
+                sampler, timing = self.emcee_sampler()
+                np.savez(self.get_output('output_dir')+'/emcee_ellwise.npz',
+                         chain=sampler.chain,
+                         names=self.params.p_free_names,
+                         time=timing)
+                print("Finished sampling", timing)
+            elif self.config.get('sampler') == 'polychord':
+                print('Running compsep: ellwise CMB (polychord)')
+                sampler, timing = self.polychord_sampler()
+                print("Finished sampling", timing)
+            else:
+                raise ValueError("Ellwise CMB: Unknown sampler.")
+            return
         if self.config.get('sampler') == 'emcee':
+            print('Running compsep: default (emcee)')
             sampler, timing = self.emcee_sampler()
             np.savez(self.get_output('output_dir')+'/emcee.npz',
                      chain=sampler.chain,
@@ -804,8 +838,9 @@ class BBCompSep(PipelineStage):
                      time=timing)
             print("Finished sampling", timing)
         elif self.config.get('sampler')=='polychord':
-            sampler = self.polychord_sampler()
-            print("Finished sampling")
+            print('Running compsep: default (polychord)')
+            sampler, timing = self.polychord_sampler()
+            print("Finished sampling", timing)
         elif self.config.get('sampler') == 'fisher':
             p0, fisher = self.fisher()
             cov = np.linalg.inv(fisher)
