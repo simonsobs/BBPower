@@ -365,7 +365,6 @@ class BBPowerSummarizer(PipelineStage):
             sim_cd_n = np.zeros([self.nsims, len(summ['spectra'][2])])
             sim_null = np.zeros([self.nsims, len(summ['spectra'][3])])
             for i, fn in enumerate(self.fname_sims):
-                #print(fn)
                 s = sacc.Sacc.load_fits(fn)
                 sb = self.parse_splits_sacc_file(s)
                 sim_cd_t[i, :] = sb['spectra'][0]

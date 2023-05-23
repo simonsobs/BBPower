@@ -1,12 +1,12 @@
 #!/bin/bash
 
-ellmin=30 #2 #10 #30
+ellmin=2 #2 #10 #30
 #simt=d1s1_maskpysm_Bonly
 #simt=d1s1_maskpysm_Bonly_r0.01
-#simt=d1s1_maskpysm_Bonly_r0.01_whitenoiONLY
-simt=d1s1_maskpysm_Bonly_whitenoiONLY
+simt=d1s1_maskpysm_Bonly_r0.01_whitenoiONLY
+#simt=d1s1_maskpysm_Bonly_whitenoiONLY
 
-fsky=0.3 #0.3 0.6 #0.8 
+fsky=0.8 #0.3 0.6 #0.8 
 zz=masked_ #full_ 
 
 #mdir="/mnt/extraspace/susanna/BBHybrid/hybrid_masked_outs/mask_planck/realistic/d1s1/fsky${fsky}/"
@@ -14,10 +14,12 @@ zz=masked_ #full_
 #mdir="/mnt/extraspace/susanna/BBHybrid/hybrid_masked_outs/mask_pysm/realistic/d1s1/fsky${fsky}_ellmin${ellmin}/"
 #mdir="/mnt/extraspace/susanna/BBHybrid/hybrid_masked_outs/mask_pysm/realistic/d1s1/fsky${fsky}_ellmin${ellmin}_r0.01/"
 #mdir="/mnt/extraspace/susanna/BBHybrid/hybrid_masked_outs/mask_pysm/realistic/d1s1/fsky${fsky}_ellmin${ellmin}_r0.01_whitenoiONLY/"
-mdir="/mnt/extraspace/susanna/BBHybrid/hybrid_masked_outs/mask_pysm/realistic/d1s1/fsky${fsky}_ellmin${ellmin}_whitenoiONLY/"
+#mdir="/mnt/extraspace/susanna/BBHybrid/hybrid_masked_outs/mask_pysm/realistic/d1s1/fsky${fsky}_ellmin${ellmin}_whitenoiONLY/"
+#mdir="/mnt/extraspace/susanna/BBHybrid/hybrid_masked_outs/mask_pysm/realistic/d1s1/fsky${fsky}_ellmin${ellmin}_whitenoiONLY_HandLlik/"
+mdir="/mnt/extraspace/susanna/BBHybrid/hybrid_masked_outs/mask_pysm/realistic/d1s1/fsky${fsky}_ellmin${ellmin}_r0.01_whitenoiONLY_HandLlik/"
 cf=$mdir"config.yml"
 
-for j in {0000..0020}
+for j in {0000..0020} #0000
 do
     output=$mdir"output$j/"
     echo $output
@@ -44,6 +46,6 @@ do
     chain=$output"param_chains.npz"
     configcopy=$output"config_copy.yml"
     
-    addqueue -s -q cmb -c 'res fsky0.3 1 hour' -m 4 -s -n 1x12 /usr/bin/python3 -m bbpower BBCompSep   --cells_coadded=$coadd   --cells_noise=$noise   --cells_fiducial=$fid   --param_chains=$chain   --config_copy=$configcopy   --config=$config
+    addqueue -s -q cmb -c 'res_fsky0.8_ellm10_h&l 2.5 hour' -m 4 -s -n 1x12 /usr/bin/python3 -m bbpower BBCompSep   --cells_coadded=$coadd   --cells_coadded_cov=$coadd   --cells_noise=$noise   --cells_fiducial=$fid   --param_chains=$chain   --config_copy=$configcopy   --config=$config
 done
 

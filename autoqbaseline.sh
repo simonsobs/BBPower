@@ -21,16 +21,16 @@
 ##        addqueue -q berg -c "2 hours" -m 1 -s -n 1x8 /usr/bin/python3 -m bbpower BBCompSep   --cells_coadded=$coadd   --cells_noise=$noise   --cells_fiducial=$fid   --param_chains=$chain   --config_copy=$configcopy   --config=$config
 ##    done
 ##done
-ellmin=30 #30 #2 #10
+ellmin=2 #30 #2 #10
 #simt=d1s1_maskpysm_Bonly
 #simt=d1s1_maskpysm_Bonly_r0.01
 #simt=d1s1_maskpysm_Bonly_r0.01_whitenoiONLY
 simt=d1s1_maskpysm_Bonly_whitenoiONLY
-fsky=0.3 #0.6 #0.8
+fsky=0.8 #0.6 #0.8
 #mdir="/mnt/extraspace/susanna/BBHybrid/baseline_masked_outs/mask_pysm/realistic/d1s1/fsky${fsky}_ellmin${ellmin}/"
 #mdir="/mnt/extraspace/susanna/BBHybrid/baseline_masked_outs/mask_pysm/realistic/d1s1/fsky${fsky}_ellmin${ellmin}_r0.01/"
 #mdir="/mnt/extraspace/susanna/BBHybrid/baseline_masked_outs/mask_pysm/realistic/d1s1/fsky${fsky}_ellmin${ellmin}_r0.01_whitenoiONLY/"
-mdir="/mnt/extraspace/susanna/BBHybrid/baseline_masked_outs/mask_pysm/realistic/d1s1/fsky${fsky}_ellmin${ellmin}_whitenoiONLY/"
+mdir="/mnt/extraspace/susanna/BBHybrid/baseline_masked_outs/mask_pysm/realistic/d1s1/fsky${fsky}_ellmin${ellmin}_whitenoiONLY_HandLlik/"
 cf=$mdir"config.yml"
 for j in {0000..0020} #0000
 do
@@ -53,7 +53,7 @@ do
     chain=$output"param_chains.npz"
     configcopy=$output"config_copy.yml"
     
-    addqueue -s -q cmb -c 'baseline fsky0.3 1 hour' -m 4 -s -n 1x12 /usr/bin/python3 -m bbpower BBCompSep   --cells_coadded=$coadd   --cells_noise=$noise   --cells_fiducial=$fid   --param_chains=$chain   --config_copy=$configcopy   --config=$config
+    addqueue -s -q berg -c 'baseline_fsky0.8_ellm2 2.5hr' -m 4 -s -n 1x12 /usr/bin/python3 -m bbpower BBCompSep   --cells_coadded=$coadd   --cells_coadded_cov=$coadd   --cells_noise=$noise   --cells_fiducial=$fid   --param_chains=$chain   --config_copy=$configcopy   --config=$config
 
 done
 

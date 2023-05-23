@@ -272,6 +272,15 @@ class BBCompSep(PipelineStage):
         if self.use_handl:
             self.bbnoise = self.vector_to_matrix(v2d_noi)
             self.bbfiducial = self.vector_to_matrix(v2d_fid)
+            if self.config.get("diff"):
+                from scipy.linalg import eig, inv, pinv
+                self.hybridparams = np.load(self.config['resid_seds'])
+                Qmat = self.hybridparams['Q']
+                eval, evec = eig(Qmat)
+                mask = eval > 0.1 #take away rows equivalent to eigenvalue=0
+                self.R = np.linalg.inv(evec)[mask, :]
+                self.bbnoise = np.einsum("aj,bk,ijk->iab", self.R, self.R, self.bbnoise) 
+                self.bbfiducial = np.einsum("aj,bk,ijk->iab", self.R, self.R, self.bbfiducial) 
         self.bbcovar = cv2d.reshape([self.n_bpws * self.ncross_modes,
                                      self.n_bpws * self.ncross_modes])
         self.invcov = np.linalg.inv(self.bbcovar)
@@ -565,11 +574,16 @@ class BBCompSep(PipelineStage):
     def prepare_h_and_l(self):
         fiducial_noise = self.bbfiducial + self.bbnoise
         self.Cfl_sqrt = np.array([sqrtm(f) for f in fiducial_noise])
+        print(self.bbdata.shape)
+        print(self.bbnoise.shape)
         self.observed_cls = self.bbdata + self.bbnoise
         return 
 
     def h_and_l_dx(self, params):
-        """                                                                                                 Hamimeche and Lewis likelihood.                                                                     Taken from Cobaya written by H, L and Torrado                                                       See: https://github.com/CobayaSampler/cobaya/blob/master/cobaya/likelihoods/_cmblikes_prototype/_cmblikes_prototype.py                                                        
+        """                                                                                                 
+        Hamimeche and Lewis likelihood.                                                                     
+        Taken from Cobaya written by H, L and Torrado                                                       
+        See: https://github.com/CobayaSampler/cobaya/blob/master/cobaya/likelihoods/_cmblikes_prototype/_cmblikes_prototype.py                                                        
         """
         model_cls = self.model(params)
         dx_vec = []
@@ -664,7 +678,7 @@ class BBCompSep(PipelineStage):
 
     #NB different from NERSC: Add Polychord
     
-    def minimizer(self):
+    def minimizer(self, save_spectra=False):
         """
         Find maximum likelihood
         """
@@ -679,6 +693,44 @@ class BBCompSep(PipelineStage):
         else:
             x = res.x
 
+        if save_spectra:
+            bbdata_cls = self.bbdata # n_bpws, nfreqs, nfreqs
+            names=self.params.p_free_names
+            parameters = dict(zip(list(names),res.x))
+            #print(parameters)
+            parameters['nu0_d'] = 220.
+            parameters['nu0_s'] = 40.
+            model_cls = self.model(parameters) # n_bpws, nfreqs, nfreqs
+            bbcov = self.bbcovar
+            l = self.ell_b
+            lmax = 300
+            msk = l<lmax
+            #errbar = np.sqrt(np.fabs(np.diag(bbcov)))[msk]
+            if self.config.get("diff"):
+                nfreq = 4
+            else:
+                nfreq = self.nfreqs
+            outpath = (self.get_output('param_chains'))[:-16]
+
+            fname_covar = f'{outpath}covar.txt'
+            with open(fname_covar, 'w') as outfcovar:
+                np.savetxt(outfcovar, bbcov)
+            print("Covariance saved")
+            
+            # Select the upper triangle
+            for i in range(nfreq): 
+                for j in range(i, nfreq): 
+                    print(i, j)
+                    fname_data = f'{outpath}data_cls_%d_%d.txt'%(i,j)
+                    fname_model = f'{outpath}model_cls_%d_%d.txt'%(i,j)
+                    with open(fname_data, 'w') as outfdata:
+                        np.savetxt(outfdata, bbdata_cls[:,i,j])
+                    with open(fname_model, 'w') as outfmodel:
+                        np.savetxt(outfmodel, model_cls[:,i,j])
+
+            print("Power spectra (data and model) saved")
+
+            exit()
         #############################################################
         ### Plot Cls
         ##bbdata_cls = self.bbdata # n_bpws, nfreqs, nfreqs
@@ -693,7 +745,7 @@ class BBCompSep(PipelineStage):
         ##for i in range(self.nfreqs):
         ##    for j in range(i, self.nfreqs):
         ##        import matplotlib.pyplot as plt
-        ##        plt.figure()
+        ##        plt.figure() 
         ##        plt.plot(self.ell_b, bbdata_cls[:,i,j], label='data')
         ##        plt.plot(self.ell_b, model_cls[:,i,j], label='theory')
         ##        plt.legend()
@@ -778,6 +830,8 @@ class BBCompSep(PipelineStage):
                      names=self.params.p_free_names)
             print("Total time:",sampler[0])
             print("Time per eval:",sampler[1])
+        elif self.config.get('sampler')=='save_spectra':
+            sampler = self.minimizer(save_spectra=True)
         else:
             raise ValueError("Unknown sampler")
 
