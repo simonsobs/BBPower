@@ -1,5 +1,6 @@
 from __future__ import print_function
 import numpy as np
+from scipy.interpolate import interp1d
 
 
 def so_SAT_beams(ls):
@@ -21,7 +22,6 @@ def so_SAT_Nl(info, ell_max, include_kludge=True):
     sens_dict = {'baseline': 1, 'goal': 2}
     oof_dict = {'pessimistic': 0, 'optimistic': 1}
     sensitivity_mode = sens_dict[info.get('sensitivity', 'baseline')]
-    one_over_f_mode = oof_dict[info.get('one_over_f', 'optimistic')]
     ydet_LF = info.get('ydet_LF', 1.)
     ydet_MF = info.get('ydet_MF', 9.)
     ydet_UHF = info.get('ydet_UHF', 5.)
@@ -33,13 +33,6 @@ def so_SAT_Nl(info, ell_max, include_kludge=True):
     S_SA_145 = np.array([1.e9, 4.3, 2.7]) * np.sqrt(2./ydet_MF)
     S_SA_225 = np.array([1.e9, 8.6, 5.7]) * np.sqrt(1./ydet_UHF)
     S_SA_280 = np.array([1.e9, 22, 14]) * np.sqrt(1./ydet_UHF)
-    f_knee_pol_SA_27 = np.array([30., 15.])
-    f_knee_pol_SA_39 = np.array([30., 15.])  # from QUIET
-    f_knee_pol_SA_93 = np.array([50., 25.])
-    f_knee_pol_SA_145 = np.array([50., 25.])  # from ABS
-    f_knee_pol_SA_225 = np.array([70., 35.])
-    f_knee_pol_SA_280 = np.array([100., 40.])
-    alpha_pol = np.array([-2.4, -2.4, -2.5, -3, -3, -3])
 
     t = 365. * 24. * 3600  # 1Y in s
     t = t * 0.2  # retention after observing efficiency and cuts
@@ -60,12 +53,35 @@ def so_SAT_Nl(info, ell_max, include_kludge=True):
     W_T_280 = S_SA_280[sensitivity_mode] / np.sqrt(t)
 
     # 1/f
-    AN_P_27 = (ell / f_knee_pol_SA_27[one_over_f_mode])**alpha_pol[0] + 1.
-    AN_P_39 = (ell / f_knee_pol_SA_39[one_over_f_mode])**alpha_pol[1] + 1.
-    AN_P_93 = (ell / f_knee_pol_SA_93[one_over_f_mode])**alpha_pol[2] + 1.
-    AN_P_145 = (ell / f_knee_pol_SA_145[one_over_f_mode])**alpha_pol[3] + 1.
-    AN_P_225 = (ell / f_knee_pol_SA_225[one_over_f_mode])**alpha_pol[4] + 1.
-    AN_P_280 = (ell / f_knee_pol_SA_280[one_over_f_mode])**alpha_pol[5] + 1.
+    oof_key = info.get('one_over_f', 'optimistic')
+    if oof_key == 'custom':
+        # If custom 1/f, read transfer function
+        fname_transfer = info.get('transfer', None)
+        if fname_transfer is None:
+            tell = np.ones_like(ell)
+        else:
+            ls, tls = np.loadtxt(fname_transfer, unpack=True)
+            tlf = interp1d(ls, tls,
+                           fill_value=(tls[0], tls[-1]),
+                           bounds_error=False)
+            tell = tlf(ell)
+        # One-over-f modulation is 1/(transfer function)
+        AN_P_27 = AN_P_39 = AN_P_93 = AN_P_145 = AN_P_225 = AN_P_280 = 1./tell
+    else:
+        alpha_pol = np.array([-2.4, -2.4, -2.5, -3, -3, -3])
+        one_over_f_mode = oof_dict[info.get('one_over_f', 'optimistic')]
+        f_knee_pol_SA_27 = np.array([30., 15.])
+        f_knee_pol_SA_39 = np.array([30., 15.])  # from QUIET
+        f_knee_pol_SA_93 = np.array([50., 25.])
+        f_knee_pol_SA_145 = np.array([50., 25.])  # from ABS
+        f_knee_pol_SA_225 = np.array([70., 35.])
+        f_knee_pol_SA_280 = np.array([100., 40.])
+        AN_P_27 = (ell / f_knee_pol_SA_27[one_over_f_mode])**alpha_pol[0] + 1.
+        AN_P_39 = (ell / f_knee_pol_SA_39[one_over_f_mode])**alpha_pol[1] + 1.
+        AN_P_93 = (ell / f_knee_pol_SA_93[one_over_f_mode])**alpha_pol[2] + 1.
+        AN_P_145 = (ell / f_knee_pol_SA_145[one_over_f_mode])**alpha_pol[3] + 1.
+        AN_P_225 = (ell / f_knee_pol_SA_225[one_over_f_mode])**alpha_pol[4] + 1.
+        AN_P_280 = (ell / f_knee_pol_SA_280[one_over_f_mode])**alpha_pol[5] + 1.
 
     # combined
     N_ell_P_27 = (W_T_27 * np.sqrt(2))**2. * A_SR * AN_P_27
