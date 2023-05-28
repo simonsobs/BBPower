@@ -14,7 +14,7 @@ export cellsdir="${simsdir}/cells"
 mkdir -p "${cellsdir}"
 
 # Create fiducial spectra
-python "${HOME}/BBPower/examples/generate_SO_spectra_baseline_optimistic.py" $cellsdir 
+python "examples/generate_SO_spectra_baseline_optimistic.py" $cellsdir 
 
 # Define data splits for covariance sacc (here choose seed 0000)
 > "${cellsdir}/splits_list.txt"
@@ -23,7 +23,6 @@ for val in $splits; do
 done
 
 # Compute covariance matrix
-conda activate bbpower
 python -m bbpower BBPowerSummarizer \
 	--splits_list="${cellsdir}/splits_list.txt" \
 	--bandpasses_list="/pscratch/sd/k/kwolz/BBPower/examples/data/bpass_list_delta.txt" \
@@ -34,4 +33,3 @@ python -m bbpower BBPowerSummarizer \
 	--cells_noise="${cellsdir}/cells_noise.fits" \
 	--cells_null="${cellsdir}/cells_null.fits" \
 	--config="${config}"
-conda deactivate

@@ -27,9 +27,7 @@ ntasks=$(( $nseeds < $ncpus ? $nseeds : $ncpus ))
 echo "Create ${ntasks} tasks to run full data pipeline"
 
 # Calculate data-C_ells and sample posteriors
-conda activate bbpower
 > "${chainsdir}/out.log"
 > "${chainsdir}/err.log"
 echo "*** Logging to ${chainsdir}/out.log and ${chainsdir}/err.log ***"
 srun "--ntasks=${ntasks}" "bash_parallel/bbpower_data.sh"
-conda deactivate
