@@ -13,7 +13,8 @@ class BBPowerSummarizer(PipelineStage):
     config_options = {'nulls_covar_type': 'diagonal',
                       'nulls_covar_diag_order': 0,
                       'data_covar_type': 'block_diagonal',
-                      'data_covar_diag_order': 3}
+                      'data_covar_diag_order': 3,
+                      'do_covar': True}
 
     def get_covariance_from_samples(self, v, s, covar_type='dense',
                                     off_diagonal_cut=0):
@@ -375,40 +376,41 @@ class BBPowerSummarizer(PipelineStage):
                                            get_saccs=True,
                                            with_windows=True)
 
-        # Read simulations
-        print("Reading simulations")
-        sim_cd_t = np.zeros([self.nsims, len(summ['spectra'][0])])
-        sim_cd_x = np.zeros([self.nsims, len(summ['spectra'][1])])
-        sim_cd_n = np.zeros([self.nsims, len(summ['spectra'][2])])
-        sim_null = np.zeros([self.nsims, len(summ['spectra'][3])])
-        for i, fn in enumerate(self.fname_sims):
-            print(fn)
-            s = sacc.Sacc.load_fits(fn)
-            sb = self.parse_splits_sacc_file(s)
-            sim_cd_t[i, :] = sb['spectra'][0]
-            sim_cd_x[i, :] = sb['spectra'][1]
-            sim_cd_n[i, :] = sb['spectra'][2]
-            sim_null[i, :] = sb['spectra'][3]
+        if do_covar:
+            # Read simulations
+            print("Reading simulations")
+            sim_cd_t = np.zeros([self.nsims, len(summ['spectra'][0])])
+            sim_cd_x = np.zeros([self.nsims, len(summ['spectra'][1])])
+            sim_cd_n = np.zeros([self.nsims, len(summ['spectra'][2])])
+            sim_null = np.zeros([self.nsims, len(summ['spectra'][3])])
+            for i, fn in enumerate(self.fname_sims):
+                print(fn)
+                s = sacc.Sacc.load_fits(fn)
+                sb = self.parse_splits_sacc_file(s)
+                sim_cd_t[i, :] = sb['spectra'][0]
+                sim_cd_x[i, :] = sb['spectra'][1]
+                sim_cd_n[i, :] = sb['spectra'][2]
+                sim_null[i, :] = sb['spectra'][3]
 
-        # Compute covariance
-        print("Covariances")
-        dctyp = self.config['data_covar_type']
-        dcord = self.config['data_covar_diag_order']
-        self.get_covariance_from_samples(sim_cd_t, summ['saccs'][0],
-                                         covar_type=dctyp,
-                                         off_diagonal_cut=dcord)
-        self.get_covariance_from_samples(sim_cd_x, summ['saccs'][1],
-                                         covar_type=dctyp,
-                                         off_diagonal_cut=dcord)
-        self.get_covariance_from_samples(sim_cd_n, summ['saccs'][2],
-                                         covar_type=dctyp,
-                                         off_diagonal_cut=dcord)
-        # There are so many nulls that we'll probably run out of memory
-        nctyp = self.config['nulls_covar_type']
-        ncord = self.config['nulls_covar_diag_order']
-        self.get_covariance_from_samples(sim_null, summ['saccs'][3],
-                                         covar_type=nctyp,
-                                         off_diagonal_cut=ncord)
+            # Compute covariance
+            print("Covariances")
+            dctyp = self.config['data_covar_type']
+            dcord = self.config['data_covar_diag_order']
+            self.get_covariance_from_samples(sim_cd_t, summ['saccs'][0],
+                                             covar_type=dctyp,
+                                             off_diagonal_cut=dcord)
+            self.get_covariance_from_samples(sim_cd_x, summ['saccs'][1],
+                                             covar_type=dctyp,
+                                             off_diagonal_cut=dcord)
+            self.get_covariance_from_samples(sim_cd_n, summ['saccs'][2],
+                                             covar_type=dctyp,
+                                             off_diagonal_cut=dcord)
+            # There are so many nulls that we'll probably run out of memory
+            nctyp = self.config['nulls_covar_type']
+            ncord = self.config['nulls_covar_diag_order']
+            self.get_covariance_from_samples(sim_null, summ['saccs'][3],
+                                             covar_type=nctyp,
+                                             off_diagonal_cut=ncord)
 
         # Save data
         print("Writing output")
