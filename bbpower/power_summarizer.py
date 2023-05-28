@@ -14,7 +14,8 @@ class BBPowerSummarizer(PipelineStage):
                       'nulls_covar_diag_order': 0,
                       'data_covar_type': 'block_diagonal',
                       'data_covar_diag_order': 3,
-                      'do_covar': True}
+                      'do_covar': True,
+                      'do_nulls': False}
 
     def get_covariance_from_samples(self, v, s, covar_type='dense',
                                     off_diagonal_cut=0):
@@ -93,11 +94,12 @@ class BBPowerSummarizer(PipelineStage):
         self.s_splits = sacc.Sacc.load_fits(self.get_input('cells_all_splits'))
         # Read sorting and number of bandpowers
         self.check_sacc_consistency(self.s_splits)
-        # Read file names for the power spectra of all simulations
-        with open(self.get_input('cells_all_sims')) as f:
-            content = f.readlines()
-        self.fname_sims = [x.strip() for x in content]
-        self.nsims = len(self.fname_sims)
+        if self.config['do_covar']:
+            # Read file names for the power spectra of all simulations
+            with open(self.get_input('cells_all_sims')) as f:
+                content = f.readlines()
+            self.fname_sims = [x.strip() for x in content]
+            self.nsims = len(self.fname_sims)
         # Polarization indices and names
         self.index_pol = {'E': 0, 'B': 1}
         self.pol_names = ['E', 'B']
@@ -297,6 +299,7 @@ class BBPowerSummarizer(PipelineStage):
         # Noise power spectra
         spectra_noise = spectra_total - spectra_xcorr
 
+
         # Nulls
         spectra_nulls = np.zeros([self.n_nulls,
                                   self.nbands, 2,
@@ -376,7 +379,7 @@ class BBPowerSummarizer(PipelineStage):
                                            get_saccs=True,
                                            with_windows=True)
 
-        if do_covar:
+        if self.config['do_covar']:
             # Read simulations
             print("Reading simulations")
             sim_cd_t = np.zeros([self.nsims, len(summ['spectra'][0])])
@@ -405,12 +408,13 @@ class BBPowerSummarizer(PipelineStage):
             self.get_covariance_from_samples(sim_cd_n, summ['saccs'][2],
                                              covar_type=dctyp,
                                              off_diagonal_cut=dcord)
-            # There are so many nulls that we'll probably run out of memory
-            nctyp = self.config['nulls_covar_type']
-            ncord = self.config['nulls_covar_diag_order']
-            self.get_covariance_from_samples(sim_null, summ['saccs'][3],
-                                             covar_type=nctyp,
-                                             off_diagonal_cut=ncord)
+            if self.config['do_nulls']:
+                # There are so many nulls that we'll probably run out of memory
+                nctyp = self.config['nulls_covar_type']
+                ncord = self.config['nulls_covar_diag_order']
+                self.get_covariance_from_samples(sim_null, summ['saccs'][3],
+                                                 covar_type=nctyp,
+                                                 off_diagonal_cut=ncord)
 
         # Save data
         print("Writing output")
