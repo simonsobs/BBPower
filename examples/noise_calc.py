@@ -252,7 +252,7 @@ def Simons_Observatory_V3_SA_beams(ell):
     return [np.exp(-0.5*ell*(ell+1)*sig**2.) for sig in SA_beams]
 
 def Simons_Observatory_V3_SA_noise(sensitivity_mode,one_over_f_mode,SAT_yrs_LF,f_sky,ell_max,delta_ell,
-                                   include_kludge=True, include_beam=True):
+                                   include_kludge=False, include_beam=True):
     ## returns noise curves in polarization only, including the impact of the beam, for the SO small aperture telescopes
     ## noise curves are polarization only
     # sensitivity_mode

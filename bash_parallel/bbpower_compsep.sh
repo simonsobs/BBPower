@@ -3,7 +3,7 @@
 # over the available nodes. Global hyperparameters and other global information 
 # is shared via the environment variables. 
 # For this specific script, make sure that the environment variables 
-# "chainsdir", "config", "splits", "cellsdir"
+# "chainsdir", "config", "cellsdir"
 # have been defined in a preceding script.
 {
 # Reads in seeds to sample 
