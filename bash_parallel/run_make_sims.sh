@@ -30,5 +30,13 @@ for i in "${sim_seeds[@]}"; do
     echo "${simsdir}/${i}" >> $sims_list
 done
 
-# Compute MCMs and simulation C_ells 
-bash "bash_parallel/bbpower_sims.sh"
+# Set number of CPUs
+ncpus=$(( $SLURM_CPUS_ON_NODE * $SLURM_JOB_NUM_NODES ))
+ntasks=$(( $nseeds < $ncpus ? $nseeds : $ncpus ))
+echo "Create ${ntasks} tasks to make simulations"
+
+# Compute MCMs and simulation C_ells
+> "${cellsdir}/out.log"
+> "${cellsdir}/err.log"
+echo "*** Logging to ${cellsdir}/out.log and ${cellsdir}/err.log ***"
+srun "--ntasks=${ntasks}" "bash_parallel/bbpower_sims.sh"
