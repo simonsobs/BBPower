@@ -317,7 +317,7 @@ class BBPowerSpecter(PipelineStage):
                                with_windows=True)
         
         # Iterate over simulations (optional)
-        if all_sims:
+        if self.config['all_sims']:
             sims = []
             with open(self.get_input('sims_list'), 'r') as f:
                 for dname in f:

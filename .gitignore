@@ -1,3 +1,16 @@
 bbpower/__pycache__/
 test/test_out/
 *~
+.ipynb_checkpoints
+bash_parallel/.ipynb_checkpoints
+bbpower/.ipynb_checkpoints
+bbpower/__init__.pyc
+dep/*
+examples/.ipynb_checkpoints
+examples/__pycache__
+test_out*
+test/new_sat_mask_emilie/*
+test/.ipynb_checkpoints
+examples/test_data/sims_list.txt
+examples/test_data/splits_list.txt
+*.log

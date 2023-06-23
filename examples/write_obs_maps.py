@@ -139,6 +139,8 @@ def main(simsdir, seed):
         sky = 'north'
     if ('south' in simsdir.split('/')[-5]) or ('south' in simsdir.split('/')[-6]):
         sky = 'south' 
+    if ('full-opt-al1' in simsdir.split('/')[-5]) or ('full-opt-al1' in simsdir.split('/')[-6]):
+        sky = 'full-opt-al1' # Optimized mask ~1/(noise+temp_lensing) (AL=1 case)
     if ('inhom' in simsdir.split('/')[-4]) or ('inhom' in simsdir.split('/')[-5]):
         inhom = True
     if ('band' in simsdir.split('/')[-4]) or ('band' in simsdir.split('/')[-5]):
@@ -155,7 +157,7 @@ def main(simsdir, seed):
     fgnames = ['synch', 'dust']
     fdir = '/global/cfs/cdirs/sobs/users/krach/BBSims'
     fdir_inhom = '/global/cfs/cdirs/sobs/users/krach/BBSims/NOISE_20210727'
-    sdir = '/global/pscratch/sd/k/kwolz/BBPower/sims/nside512/' # need trailing "/"
+    sdir = '/pscratch/sd/k/kwolz/BBPower/sims/nside512/' # need trailing "/"
     sdir += sky + '/r0'
     if r001:                              
         sdir += '01'

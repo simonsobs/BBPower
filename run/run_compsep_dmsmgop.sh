@@ -4,7 +4,7 @@
 ### Init configs
 export config="test/config_SO.yml"
 export cellsdir="/pscratch/sd/k/kwolz/BBPower/sims/nside512/full/r0_inhom/gaussian/goal/optimistic/cells"
-export chainsdir="/pscratch/sd/k/kwolz/BBPower/chains/nside512/full/r0_inhom-data/rfree-model/realistic/d0s0/goal/optimistic"
+export chainsdir="/pscratch/sd/k/kwolz/BBPower/chains/nside512/full/r0_inhom-data/rfree-model/realistic/dmsm/goal/optimistic"
 ################################################################################
 
 export OMP_NUM_THREADS=1
