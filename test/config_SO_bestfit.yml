@@ -23,7 +23,7 @@ BBPowerSummarizer:
 BBCompSep:
     # Sampler type (choose 'emcee', 'polychord', 'maximum_likelihood', 
     # 'single_point' or 'timing')
-    sampler: 'emcee'
+    sampler: 'maximum_likelihood'
     # If you chose polychord:
     nlive: 50
     nrepeat: 50
@@ -93,6 +93,7 @@ BBCompSep:
                 # Same for power spectrum parameters
                 # (broken down by polarization channel combinations)
                 EE:
+                   #amp_d_ee: ['amp', 'tophat', [0., 10., "inf"]]
                    amp_d_ee: ['amp', 'tophat', [40., 56., 80.]]
                    alpha_d_ee: ['alpha', 'tophat', [-1., -0.32, 0.]]
                    l0_d_ee: ['ell0', 'fixed', [80.]]

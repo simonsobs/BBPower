@@ -54,20 +54,35 @@ class BBPowerSpecter(PipelineStage):
             self.beams['band%d' % (i_f+1)] = bb
 
     def compute_cells_from_splits(self, splits_list):
-        # Generate fields
         print(" Generating fields")
+        has_tqu = True
+        ftest = splits_list[0]
+        if not os.path.isfile(ftest):
+            ftest = ftest + '.gz'
+        try:
+            hp.read_map(ftest, field=[0], verbose=False)
+        except:
+            raise ValueError(f'Map is not readable: {ftest}')
+        try:    
+            hp.read_map(ftest, field=[17], verbose=False)
+        except:
+            has_tqu = False
         fields = {}
         for b in range(self.n_bpss):
             for s in range(self.nsplits):
                 name = self.get_map_label(b, s)
                 print("  "+name)
                 fname = splits_list[s]
-                if not os.path.isfile(fname):  # See if it's gzipped
+                if not os.path.isfile(fname):
                     fname = fname + '.gz'
                 if not os.path.isfile(fname):
                     raise ValueError("Can't find file ", splits_list[s])
-                mp_q, mp_u = hp.read_map(fname, field=[2*b, 2*b+1],
-                                         verbose=False)
+                if has_tqu:
+                    mp_q, mp_u = hp.read_map(fname, field=[3*b+1, 3*b+2], 
+                                             verbose=False)
+                else:
+                    mp_q, mp_u = hp.read_map(fname, field=[2*b, 2*b+1], 
+                                             verbose=False)
                 fields[name] = self.get_field(b, [mp_q, mp_u])
 
         # Iterate over field pairs

@@ -37,7 +37,7 @@ def get_sky_signals(nrs, r001, Alens05, foreground, nside, freq_labels, fdir, fg
             skymaps[k] += hp.read_map(fname, field=range(3), verbose=False)
     return skymaps
 
-def get_noise(nrs, sp, sensitivity_mode, one_over_f, inhom, fdir_inhom, nside, freq_labels):
+def get_noise(nrs, sp, sensitivity_mode, one_over_f, inhom, fdir_inhom, nside, freq_labels, mask=None):
     noisemaps = np.zeros((6, 3, hp.nside2npix(nside)))
     if not inhom:
         factors = compute_noise_factors(sensitivity_mode, one_over_f)
@@ -45,7 +45,10 @@ def get_noise(nrs, sp, sensitivity_mode, one_over_f, inhom, fdir_inhom, nside, f
         if inhom:
             if sensitivity_mode == 2:
                 if one_over_f == 1:
-                    fname = f'{fdir_inhom}/goal_optimistic/{nrs}/SO_SAT_{fl}_noise_split_{sp+1}of4_{nrs}_goal_optimistic_20210727.fits'
+                    if mask=='full-opt-al1': # new lensing-optimized mask
+                        fname = f'/global/cfs/cdirs/sobs/users/emilie_h/Noise_sims_May2023/goal_optimistic/{nrs}/SO_SAT_{fl}_noise_split_{sp+1}of4_{nrs}_goal_optimistic.fits'
+                    else: # new goal white noise level
+                        fname = f'/global/cfs/cdirs/sobs/users/krach/BBSims/NOISE_20230531/goal_optimistic/{nrs}/SO_SAT_{fl}_noise_split_{sp+1}of4_{nrs}_goal_optimistic_20230531.fits'
                 elif one_over_f == 0:
                     fname = f'{fdir_inhom}/goal_pessimistic/{nrs}/SO_SAT_{fl}_noise_split_{sp+1}of4_{nrs}_goal_pessimistic_20210727.fits'
             elif sensitivity_mode == 1:
@@ -113,11 +116,14 @@ def run(sdir, nrs, r001, Alens05, sensitivity_mode, one_over_f, foreground, inho
     skymaps = get_sky_signals(nrs, r001, Alens05, foreground, nside, 
                               freq_labels, fdir, fgnames)
     sname = f'{sdir}SO_SAT_maps_sky_signal.fits'
+    mask = None
+    if 'full-opt-al1' in sdir:
+        mask = 'full-opt-al1'
     if overwrite==False and os.path.isfile(sname)==False:
         hp.write_map(sname, skymaps.reshape(18, -1))
     for sp in range(4):
         noisemaps = get_noise(nrs, sp, sensitivity_mode, one_over_f, inhom, 
-                              fdir_inhom, nside, freq_labels)
+                              fdir_inhom, nside, freq_labels, mask=mask)
         sname = f'{sdir}SO_SAT_obs_map_split_{sp+1}of4.fits'
         totalmaps = noisemaps + skymaps
         if overwrite==False and os.path.isfile(sname)==False:

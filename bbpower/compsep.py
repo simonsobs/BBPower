@@ -26,7 +26,8 @@ class BBCompSep(PipelineStage):
                ('config_copy', YamlFile)]
     config_options = {'likelihood_type': 'h&l', 'n_iters': 32,
                       'nwalkers': 16, 'r_init': 1.e-3,
-                      'sampler': 'emcee', 'bands': 'all'}
+                      'sampler': 'emcee', 'bands': 'all',
+                     'resume': False}
 
     def setup_compsep(self):
         """
@@ -634,16 +635,16 @@ class BBCompSep(PipelineStage):
             nchain = len(backend.get_chain())
         except AttributeError:
             found_file = False
-
-        if not found_file:
+            
+        if found_file and self.config['resume']:
+            print("Restarting from previous run")
+            pos = None
+            nsteps_use = max(n_iters-nchain, 0)
+        else:
             backend.reset(nwalkers, ndim)
             pos = [self.params.p0 + 1.e-3*np.random.randn(ndim)
                    for i in range(nwalkers)]
             nsteps_use = n_iters
-        else:
-            print("Restarting from previous run")
-            pos = None
-            nsteps_use = max(n_iters-nchain, 0)
 
         with Pool() as pool:
             import time
@@ -692,7 +693,7 @@ class BBCompSep(PipelineStage):
         settings.boost_posterior = 10  # Increase number of posterior samples
         settings.nprior = 200          # Draw nprior initial prior samples
         settings.maximise = True       # Maximize posterior at the end
-        settings.read_resume = False   # Read from resume file of earlier run
+        settings.read_resume = self.config['resume']   # Resume for earlier run
         settings.feedback = 2          # Verbosity {0,1,2,3}
 
         output = pypolychord.run_polychord(likelihood, ndim, nder, settings, 
@@ -826,8 +827,10 @@ class BBCompSep(PipelineStage):
                      names=self.params.p_free_names)
         elif self.config.get('sampler') == 'maximum_likelihood':
             sampler = self.minimizer()
-            chi2 = -2*self.lnprob(sampler)
-            np.savez(self.get_output('output_dir')+'/chi2.npz',
+            #chi2 = -2*self.lnprob(sampler)
+            chi2 = -2*self.lnlike(sampler) # NEW TEST (6/7/23)
+            #np.savez(self.get_output('output_dir')+'/chi2.npz',
+            np.savez(self.get_output('output_dir')+'/chi2_like.npz',  # NEW TEST (6/7/23)
                      params=sampler,
                      names=self.params.p_free_names,
                      chi2=chi2, ndof=len(self.bbcovar))

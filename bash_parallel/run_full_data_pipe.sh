@@ -1,16 +1,27 @@
 #!/bin/bash
-# Tested on 50 computing nodes (walltime ~ 60 min)
+#SBATCH -N 4
+#SBATCH -C cpu
+#SBATCH -q preempt
+#SBATCH --mail-user=kwolz@sissa.it
+#SBATCH --mail-type=fail
+#SBATCH -t 00:45:00
+#SBATCH -o run_full_data_pipe_d1s1blop.log
+
+# Tested 100 sims on 4 CPU nodes, preempt (walltime 27 min)
 ################################################################################
 ### Init configs
 export splits="SO_SAT_obs_map_split_1of4.fits SO_SAT_obs_map_split_2of4.fits SO_SAT_obs_map_split_3of4.fits SO_SAT_obs_map_split_4of4.fits"
 export mask_apodized="/pscratch/sd/k/kwolz/BBPower/examples/data/maps/mask_apodized_david_nside512.fits"
 export mcmsdir="/pscratch/sd/k/kwolz/BBPower/mcms/nside512/full/apo-david"
 export config="test/config_SO.yml"
-export datadir="/pscratch/sd/k/kwolz/BBPower/sims/nside512/full/r0_inhom/realistic/d0s0/baseline/optimistic"
+export datadir="/pscratch/sd/k/kwolz/BBPower/sims/nside512/full/r0_inhom/realistic/d1s1/baseline/optimistic"
 export cellsdir="/pscratch/sd/k/kwolz/BBPower/sims/nside512/full/r0_inhom/gaussian/baseline/optimistic/cells"
-export chainsdir="/pscratch/sd/k/kwolz/BBPower/chains/nside512/full/r0_inhom-data/rfree-model/realistic/d0s0/baseline/optimistic"
+export chainsdir="/pscratch/sd/k/kwolz/BBPower/chains/nside512/full/r0_inhom-data/rfree-model/realistic/d1s1/baseline/optimistic"
 ################################################################################
 
+# Load python environment
+module load python
+source activate bbpower
 export OMP_NUM_THREADS=1
 
 # Create the output directory

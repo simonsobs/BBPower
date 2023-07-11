@@ -1,5 +1,13 @@
 #!/bin/bash
-# Tested on 50 computing nodes (walltime ~ 60 min)
+#SBATCH -N 15
+#SBATCH -C cpu
+#SBATCH -q preempt
+#SBATCH --mail-user=kwolz@sissa.it
+#SBATCH --mail-type=fail
+#SBATCH -t 00:30:00
+#SBATCH -o run_make_sims_blop.log
+
+# Tested on 15 CPU nodes, preempt, with 500 sims (wall clock time 21 mins)
 ################################################################################
 ### Init configs
 export splits="SO_SAT_obs_map_split_1of4.fits SO_SAT_obs_map_split_2of4.fits SO_SAT_obs_map_split_3of4.fits SO_SAT_obs_map_split_4of4.fits"
@@ -11,6 +19,9 @@ export cellsdir="${simsdir}/cells"
 export sims_list="${cellsdir}/sims_list.txt"
 ################################################################################
 
+# Load python environment
+module load python
+source activate bbpower
 export OMP_NUM_THREADS=1
 
 # Create the output directories

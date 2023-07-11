@@ -1,4 +1,10 @@
 #!/bin/bash
+
+# This script is a patch - it runs BBPowerSpecter once and has the purpose of 
+# computing the PCL mode couping matrices. This has do be done just once per 
+# mask.
+
+# Tested on login node (wall clock time <20 min).
 ################################################################################
 ### Init configs
 export splits="SO_SAT_obs_map_split_1of4.fits SO_SAT_obs_map_split_2of4.fits SO_SAT_obs_map_split_3of4.fits SO_SAT_obs_map_split_4of4.fits"
@@ -10,7 +16,11 @@ export cellsdir="${simsdir}/cells"
 export sims_list="${cellsdir}/sims_list.txt"
 ################################################################################
 
-# The data seed is irrelecant for the mcm calculation.
+# Load python environment
+module load python
+source activate bbpower
+
+# Which data seed we choose doesn't matter.
 export data_seed=0000
 
 # Creates simsdirs

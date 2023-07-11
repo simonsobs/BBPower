@@ -1,12 +1,23 @@
 #!/bin/bash
-# Tested on 50 computing nodes (walltime ~ 50 min)
+#SBATCH -N 4
+#SBATCH -C cpu
+#SBATCH -q preempt
+#SBATCH --mail-user=kwolz@sissa.it
+#SBATCH --mail-type=fail
+#SBATCH -t 00:10:00
+#SBATCH -o run_compsep_d1s1blop.log
+
+# Tested 100 sims on 4 CPU nodes, preempt (wall clock time 6 min)
 ################################################################################
 ### Init configs
 export config="test/config_SO.yml"
-export cellsdir="/pscratch/sd/k/kwolz/BBPower/sims/nside512/full/r0_inhom/gaussian/goal/optimistic/cells"
-export chainsdir="/pscratch/sd/k/kwolz/BBPower/chains/nside512/full/r0_inhom-data/rfree-model/realistic/d0s0/goal/optimistic"
+export cellsdir="/pscratch/sd/k/kwolz/BBPower/sims/nside512/full/r0_inhom/gaussian/baseline/optimistic/cells"
+export chainsdir="/pscratch/sd/k/kwolz/BBPower/chains/nside512/full/r0_inhom-data/rfree-model/realistic/d1s1/baseline/optimistic"
 ################################################################################
 
+# Load python environment
+module load python
+source activate bbpower
 export OMP_NUM_THREADS=1
 
 # Create the output directory

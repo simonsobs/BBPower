@@ -19,4 +19,4 @@ python -m bbpower BBCompSep \
     --cells_coadded_cov="${cellsdir}/cells_coadded.fits" \
     --output_dir="test_out_${data_seed}" \
     --config_copy="test_out_${data_seed}/config_copy.yml" \
-    --config="test/config_SO.yml"
+    --config="test/config_SO_mask_opt_al1.yml"

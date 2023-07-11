@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -N 1
+#SBATCH -N 19
 #SBATCH -C cpu
 #SBATCH -q preempt
 #SBATCH --mail-user=kwolz@sissa.it
@@ -8,12 +8,10 @@
 #SBATCH -o run_full_data_pipe_dmsmblop.log
 
 # Load python environment
-#module purge
 module load python
-#module load gsl
 source activate bbpower
 
-# Tested on 1 preempt node with 24 sims (22 mins)
+# Tested on 19 preempt nodes with 475 sims (25 mins, 4.00 NERSC hours)
 ################################################################################
 ### Init configs
 export splits="SO_SAT_obs_map_split_1of4.fits SO_SAT_obs_map_split_2of4.fits SO_SAT_obs_map_split_3of4.fits SO_SAT_obs_map_split_4of4.fits"
@@ -31,7 +29,7 @@ export OMP_NUM_THREADS=1
 mkdir -p "${chainsdir}"
 
 # Set data seeds
-seeds=( $(seq -f "%04g" 0026 0075 ) )
+seeds=( $(seq -f "%04g" 0026 0499 ) )
 printf "%s\n" "${seeds[@]}" > "${chainsdir}/seeds.txt" 
 export nseeds=${#seeds[@]}
 

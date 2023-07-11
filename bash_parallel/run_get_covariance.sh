@@ -1,5 +1,6 @@
 #!/bin/bash
-# Tested on 1 computing node (walltime ~ 180 min)
+
+# Tested on login node for 100 sims (walltime ~10min)
 ################################################################################
 ### Init configs
 export splits="SO_SAT_obs_map_split_1of4.fits SO_SAT_obs_map_split_2of4.fits SO_SAT_obs_map_split_3of4.fits SO_SAT_obs_map_split_4of4.fits"
@@ -9,6 +10,10 @@ export mcmsdir="/pscratch/sd/k/kwolz/BBPower/mcms/nside512/full/apo-david"
 export simsdir="/pscratch/sd/k/kwolz/BBPower/sims/nside512/full/r0_inhom/gaussian/baseline/optimistic"
 export cellsdir="${simsdir}/cells"
 ################################################################################
+
+# Load python environment
+module load python
+source activate bbpower
 
 # Create the output directories
 mkdir -p "${cellsdir}"
