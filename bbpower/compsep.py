@@ -3,7 +3,7 @@ import os
 from scipy.linalg import sqrtm
 
 from bbpipe import PipelineStage
-from .types import NpzFile, FitsFile, YamlFile
+from .types import NpzFile, FitsFile, YamlFile, DirFile
 from .fg_model import FGModel
 from .param_manager import ParameterManager
 from .bandpasses import (Bandpass, rotate_cells, rotate_cells_mat,
@@ -20,8 +20,9 @@ class BBCompSep(PipelineStage):
     name = "BBCompSep"
     inputs = [('cells_coadded', FitsFile),
               ('cells_noise', FitsFile),
-              ('cells_fiducial', FitsFile)]
-    outputs = [('param_chains', NpzFile),
+              ('cells_fiducial', FitsFile),
+              ('cells_coadded_cov', FitsFile)]
+    outputs = [('output_dir', DirFile),
                ('config_copy', YamlFile)]
     config_options = {'likelihood_type': 'h&l', 'n_iters': 32,
                       'nwalkers': 16, 'r_init': 1.e-3,
@@ -112,6 +113,12 @@ class BBCompSep(PipelineStage):
 
         # Read data
         self.s = sacc.Sacc.load_fits(self.get_input('cells_coadded'))
+        self.s_cov = sacc.Sacc.load_fits(self.get_input('cells_coadded_cov'))
+        tr_comb = self.s.get_tracer_combinations()
+        for tr1, tr2 in tr_comb:
+            ind1 = self.s.indices(data_type='cl_bb', tracers=(tr1, tr2))
+            ind2 = self.s_cov.indices(data_type='cl_bb', tracers=(tr1, tr2))
+            assert np.all(ind1 == ind2), "Covariance sacc ordering is wrong"
         if self.use_handl:
             s_fid = sacc.Sacc.load_fits(self.get_input('cells_fiducial'))
             s_noi = sacc.Sacc.load_fits(self.get_input('cells_noise'))
@@ -127,6 +134,7 @@ class BBCompSep(PipelineStage):
         for c in corr_all:
             if c not in corr_keep:
                 self.s.remove_selection(c)
+                self.s_cov.remove_selection(c)
                 if self.use_handl:
                     s_fid.remove_selection(c)
                     s_noi.remove_selection(c)
@@ -134,6 +142,8 @@ class BBCompSep(PipelineStage):
         # Scale cuts
         self.s.remove_selection(ell__gt=self.config['l_max'])
         self.s.remove_selection(ell__lt=self.config['l_min'])
+        self.s_cov.remove_selection(ell__gt=self.config['l_max'])
+        self.s_cov.remove_selection(ell__lt=self.config['l_min'])
         if self.use_handl:
             s_fid.remove_selection(ell__gt=self.config['l_max'])
             s_fid.remove_selection(ell__lt=self.config['l_min'])
@@ -179,7 +189,7 @@ class BBCompSep(PipelineStage):
 
         # Get power spectra and covariances
         if self.config['bands'] == 'all':
-            if not (self.s.covariance.covmat.shape[-1] == len(self.s.mean) == self.n_bpws * self.ncross):
+            if not (self.s_cov.covariance.covmat.shape[-1] == len(self.s.mean) == self.n_bpws * self.ncross):
                 raise ValueError("C_ell vector's size is wrong")
 
         v2d = np.zeros([self.n_bpws, self.ncross])
@@ -217,7 +227,7 @@ class BBCompSep(PipelineStage):
                 pol2b = self.pols[p2b].lower()
                 cl_typb = f'cl_{pol1b}{pol2b}'
                 ind_b = self.s.indices(cl_typb, (t1b, t2b))
-                cv2d[:, ind_vec, :, ind_vecb] = self.s.covariance.covmat[ind_a][:, ind_b]
+                cv2d[:, ind_vec, :, ind_vecb] = self.s_cov.covariance.covmat[ind_a][:, ind_b]
 
         # Store data
         self.bbdata = self.vector_to_matrix(v2d)
@@ -285,8 +295,9 @@ class BBCompSep(PipelineStage):
 
             if comp['decorr']:
                 d_amp = params[comp['decorr_param_names']['decorr_amp']]
-                d_nu0 = params[comp['decorr_param_names']['decorr_nu0']]
-                decorr_delta = d_amp**(1./np.log(d_nu0)**2)
+                d_nu01 = params[comp['decorr_param_names']['decorr_nu01']]
+                d_nu02 = params[comp['decorr_param_names']['decorr_nu02']]
+                decorr_delta = d_amp**(1./np.log(d_nu01/d_nu02)**2)
                 for f1 in range(self.nfreqs):
                     for f2 in range(f1, self.nfreqs):
                         sed_12 = decorrelated_bpass(self.bpss[f1],
@@ -337,6 +348,16 @@ class BBCompSep(PipelineStage):
         cmb_cell = (params['r_tensor'] * self.cmb_tens +
                     params['A_lens'] * self.cmb_lens +
                     self.cmb_scal) * self.dl2cl
+        # [nell,npol,npol]
+        cmb_cell = np.transpose(cmb_cell, axes=[2, 0, 1])
+        if self.config['cmb_model'].get('use_birefringence'):
+            bi_angle = np.radians(params['birefringence'])
+            c = np.cos(2*bi_angle)
+            s = np.sin(2*bi_angle)
+            bmat = np.array([[c, s],
+                             [-s, c]])
+            cmb_cell = rotate_cells_mat(bmat, bmat, cmb_cell)
+        
         # [ncomp, ncomp, nfreq, nfreq], [ncomp, nfreq,[matrix]]
         fg_scaling, rot_m = self.integrate_seds(params)
         # [ncomp,npol,npol,nell]
@@ -348,8 +369,6 @@ class BBCompSep(PipelineStage):
                                  self.n_ell, self.npol, self.npol])
         # [ncomp,nell,npol,npol]
         fg_cell = np.transpose(fg_cell, axes=[0, 3, 1, 2])
-        # [nell,npol,npol]
-        cmb_cell = np.transpose(cmb_cell, axes=[2, 0, 1])
 
         # SED scaling
         cmb_scaling = np.ones(self.nfreqs)
@@ -431,9 +450,9 @@ class BBCompSep(PipelineStage):
                         cls += (fg_scaling_d1[f1, c1] * fg_scaling_d1[f2, c1] *
                                 cls_11[c1])
                         cls += 0.5 * (fg_scaling_d2[f1, c1] *
-                                      fg_scaling[c1, c1, f2, f2] +
+                                      (fg_scaling[c1, c1, f2, f2])**0.5 +
                                       fg_scaling_d2[f2, c1] *
-                                      fg_scaling[c1, c1, f1, f1]) * cls_02[c1]
+                                      (fg_scaling[c1, c1, f1, f1])**0.5) * cls_02[c1]
                     cls_array_fg[f1, f2] += cls
 
         # Window convolution
@@ -603,8 +622,7 @@ class BBCompSep(PipelineStage):
         import emcee
         from multiprocessing import Pool
 
-        fname_temp = self.get_output('param_chains')+'.h5'
-
+        fname_temp = self.get_output('output_dir')+'/emcee.npz.h5'
         backend = emcee.backends.HDFBackend(fname_temp)
 
         nwalkers = self.config['nwalkers']
@@ -628,13 +646,16 @@ class BBCompSep(PipelineStage):
             nsteps_use = max(n_iters-nchain, 0)
 
         with Pool() as pool:
+            import time
+            start = time.time()
             sampler = emcee.EnsembleSampler(nwalkers, ndim,
                                             self.lnprob,
                                             backend=backend)
             if nsteps_use > 0:
                 sampler.run_mcmc(pos, nsteps_use, store=True, progress=False)
+                end = time.time()
 
-        return sampler
+        return sampler, end-start
 
     def polychord_sampler(self):
         import pypolychord
@@ -663,7 +684,7 @@ class BBCompSep(PipelineStage):
             print("Last dead point:", dead[-1])
 
         settings = PolyChordSettings(ndim, nder)
-        settings.base_dir = self.get_output('param_chains')[:-4] # Remove ".npz"
+        settings.base_dir = self.get_output('output_dir')+'/polychord'
         settings.file_root = 'pch'
         settings.nlive = self.config['nlive']
         settings.num_repeats = self.config['nrepeat']
@@ -734,17 +755,64 @@ class BBCompSep(PipelineStage):
         end = time.time()
 
         return end-start, (end-start)/n_eval
+    
+    def predicted_spectra(self, at_min=True, save_npz=True):
+        """
+        Evaluates model at a the maximum likelihood and 
+        writes predicted spectra into a numpy array 
+        with shape (nbpws, nmaps, nmaps).
+        """
+        if at_min:
+            sampler = self.minimizer()
+            p = np.array(sampler)
+        else:
+            p = self.params.p0
+        pars = self.params.build_params(p)
+        print(pars)
+        model_cls = self.model(pars)
+        if self.config['bands'] == 'all':
+            tr_names = sorted(list(self.s.tracers.keys()))
+        else:
+            tr_names = self.config['bands']
+        if save_npz:
+            np.savez(self.get_output('output_dir')+'/cells_model.npz',
+                     tracers=tr_names, 
+                     ls=self.ell_b,
+                     dls=model_cls)
+            return
+        s = sacc.Sacc()
+        for it, tn in enumerate(tr_names):
+            t = self.s.tracers[tn]
+            s.add_tracer('NuMap', tn, quantity='cmb_polarization',
+                         spin=2, nu=t.nu, bandpass=t.bandpass,
+                         ell=t.ell, beam=t.beam, nu_unit='GHz',
+                         map_unit='uK_CMB')
+        for b1, b2, p1, p2, m1, m2, ind in self._freq_pol_iterator():
+            cl = model_cls[:, m1, m2]
+            t1 = tr_names[b1]
+            t2 = tr_names[b2]
+            pol1 = self.pols[p1].lower()
+            pol2 = self.pols[p2].lower()
+            cltyp = f'cl_{pol1}{pol2}'
+            win = sacc.BandpowerWindow(self.bpw_l, self.windows[ind].T)
+            s.add_ell_cl(cltyp, t1, t2, self.ell_b, cl, window=win)
+        s.add_covariance(self.bbcovar)
+        s.save_fits(self.get_output('output_dir')+'/cells_model.fits',
+                    overwrite=True)
+        
+        return
 
     def run(self):
         from shutil import copyfile
         copyfile(self.get_input('config'), self.get_output('config_copy'))
         self.setup_compsep()
         if self.config.get('sampler') == 'emcee':
-            sampler = self.emcee_sampler()
-            np.savez(self.get_output('param_chains'),
+            sampler, timing = self.emcee_sampler()
+            np.savez(self.get_output('output_dir')+'/emcee.npz',
                      chain=sampler.chain,
-                     names=self.params.p_free_names)
-            print("Finished sampling")
+                     names=self.params.p_free_names,
+                     time=timing)
+            print("Finished sampling", timing)
         elif self.config.get('sampler')=='polychord':
             sampler = self.polychord_sampler()
             print("Finished sampling")
@@ -753,13 +821,13 @@ class BBCompSep(PipelineStage):
             cov = np.linalg.inv(fisher)
             for i, (n, p) in enumerate(zip(self.params.p_free_names, p0)):
                 print(n+" = %.3lE +- %.3lE" % (p, np.sqrt(cov[i, i])))
-            np.savez(self.get_output('param_chains'),
+            np.savez(self.get_output('output_dir')+'/fisher.npz',
                      params=p0, fisher=fisher,
                      names=self.params.p_free_names)
         elif self.config.get('sampler') == 'maximum_likelihood':
             sampler = self.minimizer()
             chi2 = -2*self.lnprob(sampler)
-            np.savez(self.get_output('param_chains'),
+            np.savez(self.get_output('output_dir')+'/chi2.npz',
                      params=sampler,
                      names=self.params.p_free_names,
                      chi2=chi2, ndof=len(self.bbcovar))
@@ -769,17 +837,22 @@ class BBCompSep(PipelineStage):
             print("Chi2: %.3lE" % chi2)
         elif self.config.get('sampler') == 'single_point':
             sampler = self.singlepoint()
-            np.savez(self.get_output('param_chains'),
+            np.savez(self.get_output('output_dir')+'/single_point.npz',
                      chi2=sampler, ndof=len(self.bbcovar),
                      names=self.params.p_free_names)
-            print("Chi^2:", sampler, len(self.bbcovar))
+            print("Chi2:", sampler, len(self.bbcovar))
         elif self.config.get('sampler') == 'timing':
             sampler = self.timing()
-            np.savez(self.get_output('param_chains'),
+            np.savez(self.get_output('output_dir')+'/timing.npz',
                      timing=sampler[1],
                      names=self.params.p_free_names)
             print("Total time:", sampler[0])
             print("Time per eval:", sampler[1])
+        elif self.config.get('sampler')=='predicted_spectra':
+            at_min = self.config.get('predict_at_minimum', True)
+            save_npz = not self.config.get('predict_to_sacc', False)
+            sampler = self.predicted_spectra(at_min=at_min, save_npz=save_npz)
+            print("Predicted spectra saved")
         else:
             raise ValueError("Unknown sampler")
 
