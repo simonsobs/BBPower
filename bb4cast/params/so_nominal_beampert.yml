@@ -1,0 +1,33 @@
+bands:
+  LF1:
+    freq: 27.
+    beam: 91.
+    bandpass: examples/data/bandpasses/LF1.txt
+    delta_beam: bb4cast/example_data/delta_beam_LF1_FWHM0p01.txt
+  LF2:
+    freq: 39.
+    beam: 63.
+    bandpass: examples/data/bandpasses/LF2.txt
+    delta_beam: bb4cast/example_data/delta_beam_LF2_FWHM0p01.txt
+  MF1:
+    freq: 93.
+    beam: 30.
+    bandpass: examples/data/bandpasses/MF1.txt
+    delta_beam: bb4cast/example_data/delta_beam_MF1_FWHM0p01.txt
+  MF2:
+    freq: 145.
+    beam: 17.
+    bandpass: examples/data/bandpasses/MF2.txt
+    delta_beam: bb4cast/example_data/delta_beam_MF2_FWHM0p01.txt
+  UHF1:
+    freq: 225.
+    beam: 11.
+    bandpass: examples/data/bandpasses/UHF1.txt
+    delta_beam: bb4cast/example_data/delta_beam_UHF1_FWHM0p01.txt
+  UHF2:
+    freq: 280.
+    beam: 9.
+    bandpass: examples/data/bandpasses/UHF2.txt
+    delta_beam: bb4cast/example_data/delta_beam_UHF2_FWHM0p01.txt
+
+f_sky: 0.1

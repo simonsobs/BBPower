@@ -5,6 +5,7 @@ import sacc
 import os
 import sys
 import yaml
+from scipy.interpolate import interp1d
 
 
 def get_spectra(info):
@@ -43,6 +44,19 @@ def get_spectra(info):
     beams = {bn: np.exp(-0.5*ls*(ls+1)*fwhm2s(info['bands'][bn]['beam'])**2)
              for bn in band_names}
 
+    # Beam perturbations
+    # Read beam relative perturbations
+    beam_delta = {}
+    for bn in band_names:
+        fname = info['bands'][bn].get('delta_beam', None)
+        if fname is None:  # No perturbation
+            beam_delta[bn] = np.ones_like(ls)
+            continue
+        ell, delta_beam = np.loadtxt(fname, unpack=True)
+        delta_beam_f = interp1d(ell, delta_beam, bounds_error=False,
+                                fill_value=0)
+        beam_delta[bn] = 1+delta_beam_f(ls)
+
     # Component spectra
     dls_comp=np.zeros([3,2,3,2,lmax+1]) #[ncomp,np,ncomp,np,nl]
     (dls_comp[1,0,1,0,:],
@@ -53,15 +67,21 @@ def get_spectra(info):
      dls_comp[0,1,0,1,:]) = get_component_spectra(info, lmax)
     dls_comp *= dl2cl[None, None, None, None, :]
 
-    # Convolve with windows
-    bpw_comp=np.sum(dls_comp[:,:,:,:,None,:]*windows[None,None,None,None,:,:],axis=5)
-
     # Convolved SEDs
     seds = get_convolved_seds(info, band_names, bpss)
     _, nfreqs = seds.shape
 
     # Component -> frequencies
-    bpw_freq_sig=np.einsum('ik,jm,iljno',seds,seds,bpw_comp)
+    dls_freq_sig=np.einsum('ik,jm,iljno',seds,seds,dls_comp)
+
+    # Apply beam perturbations
+    beam_prod = np.array([[beam_delta[bn1]*beam_delta[bn2]
+                           for bn1 in band_names]
+                          for bn2 in band_names])
+    dls_freq_sig *= beam_prod[:, None, :, None, :]
+
+    # Convolve with windows
+    bpw_freq_sig=np.sum(dls_freq_sig[:,:,:,:,None,:]*windows[None,None,None,None,:,:],axis=5)
 
     # N_ell
     _, nell = nc.so_SAT_Nl(info, lmax)
