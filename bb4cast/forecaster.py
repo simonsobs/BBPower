@@ -144,9 +144,10 @@ def get_bbpower_command(info):
     pyexec = info.get('pyexec', 'python')
     cmd = f'{pyexec} -m bbpower BBCompSep '
     cmd += f'--cells_coadded={prefix}cls_coadd.fits '
+    cmd += f'--cells_coadded_cov={prefix}cls_coadd.fits '
     cmd += f'--cells_noise={prefix}cls_noise.fits '
     cmd += f'--cells_fiducial={prefix}cls_fid.fits '
-    cmd += f'--param_chains={prefix}param_chains.npz '
+    cmd += f'--output_dir={prefix} '
     cmd += f'--config_copy={prefix}bbpower_copy '
     cmd += f'--config={prefix}config.yml'
     return cmd
