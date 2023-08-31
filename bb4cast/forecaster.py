@@ -143,13 +143,23 @@ def get_spectra(info):
 
     # Add covariance
     fsky = info.get('f_sky', 0.1)
+    fsky_ss = info.get('f_sky_ss', fsky)
+    fsky_sn = info.get('f_sky_sn', fsky)
+    fsky_nn = info.get('f_sky_nn', fsky)
     cov_bpw = np.zeros([ncross, nbands, ncross, nbands])
-    factor_modecount = 1./((2*leff+1)*dell*fsky)
+    factor_modecount = 1./((2*leff+1)*dell)
     for ii, (i1, i2) in enumerate(zip(indices_tr[0], indices_tr[1])):
         for jj, (j1, j2) in enumerate(zip(indices_tr[0], indices_tr[1])):
-            covar = (bpw_freq_tot[i1, j1, :]*bpw_freq_tot[i2, j2, :]+
-                     bpw_freq_tot[i1, j2, :]*bpw_freq_tot[i2, j1, :]) * factor_modecount
-            cov_bpw[ii, :, jj, :] = np.diag(covar)
+            cov_ss = (bpw_freq_sig[i1, j1, :]*bpw_freq_sig[i2, j2, :]+
+                      bpw_freq_sig[i1, j2, :]*bpw_freq_sig[i2, j1, :])/fsky_ss
+            cov_nn = (bpw_freq_noi[i1, j1, :]*bpw_freq_noi[i2, j2, :]+
+                      bpw_freq_noi[i1, j2, :]*bpw_freq_noi[i2, j1, :])/fsky_nn
+            cov_sn = (bpw_freq_sig[i1, j1, :]*bpw_freq_noi[i2, j2, :]+
+                      bpw_freq_noi[i1, j1, :]*bpw_freq_sig[i2, j2, :]+
+                      bpw_freq_sig[i1, j2, :]*bpw_freq_noi[i2, j1, :]+
+                      bpw_freq_noi[i1, j2, :]*bpw_freq_sig[i2, j1, :])/fsky_sn
+            covar = cov_ss+cov_nn+cov_sn
+            cov_bpw[ii, :, jj, :] = np.diag(covar*factor_modecount)
     cov_bpw = cov_bpw.reshape([ncross * nbands, ncross * nbands])
     s_d.add_covariance(cov_bpw)
 
