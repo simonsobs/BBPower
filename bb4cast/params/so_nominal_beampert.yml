@@ -31,3 +31,6 @@ bands:
     delta_beam: bb4cast/example_data/delta_beam_UHF2_FWHM0p01.txt
 
 f_sky: 0.1
+f_sky_ss: 0.1
+f_sky_sn: 0.1
+f_sky_nn: 0.1

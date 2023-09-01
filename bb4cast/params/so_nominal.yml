@@ -25,3 +25,6 @@ bands:
     bandpass: examples/data/bandpasses/UHF2.txt
 
 f_sky: 0.1
+f_sky_ss: 0.1
+f_sky_sn: 0.1
+f_sky_nn: 0.1
