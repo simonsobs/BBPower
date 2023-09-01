@@ -24,7 +24,7 @@ bands:
     beam: 9.
     bandpass: examples/data/bandpasses/UHF2.txt
 
-f_sky: 0.1
-f_sky_ss: 0.1
-f_sky_sn: 0.1
-f_sky_nn: 0.1
+f_sky: 0.184
+f_sky_ss: 0.114
+f_sky_sn: 0.152
+f_sky_nn: 0.184

@@ -3,7 +3,7 @@ sensitivity: baseline
 # Allowed values:
 #  - pessimistic/optimistic
 #  - custom: in this case, include also a transfer function (below)
-one_over_f: custom
+one_over_f: optimistic
 # If `one_over_f == 'custom'`, pass a transfer function below.
 # The format of this file should be two columns: ell, T_ell
 transfer: bb4cast/params/transfer_dummy.txt
