@@ -1,0 +1,11 @@
+prefix_out: so_nominal_baseline_optimistic
+sensitivity: baseline
+one_over_f: optimistic
+ydet_LF: 1.
+ydet_MF: 9.
+ydet_UHF: 5.
+recompute_data: False
+pyexec: "addqueue -s -c baseline_optimistic_1_9_5 -n 1x12 -q cmb -m 2 /usr/bin/python3"
+sampler: emcee
+nwalkers: 128
+nsamples: 10000
