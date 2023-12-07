@@ -52,6 +52,23 @@ class BBPowerSpecter(PipelineStage):
             if li[0] != 0:
                 bb[:int(li[0])] = bi[0]
             self.beams['band%d' % (i_f+1)] = bb
+            
+    def read_beams_chromaticity(self):
+        pass
+    
+#         beams = {...}
+#         for i_f, f in enumerate(channels):
+#             beams[f] = {}
+#             for inu, nu in enumerate(beam_freqs_chroma):
+#                 fname = get_beam_name_chroma(f, nu)
+#                 li, bi = np.loadtxt(fname, unpack=True)
+#                 bb = interp1d(li, bi, fill_value=0,
+#                               bounds_error=False)(self.larr_all)
+#             # TODO
+#             if li[0] != 0:
+#                 bb[:int(li[0])] = bi[0]
+#             beams[...]['band%d' % (i_f+1)] = bb
+
 
     def compute_cells_from_splits(self, splits_list):
         print(" Generating fields")
@@ -234,6 +251,7 @@ class BBPowerSpecter(PipelineStage):
                                          bandpass_extra={'dnu': bpss['dnu']})
                 sacc_t.append(T)
         return sacc_t
+
 
     def get_sacc_windows(self):
         windows_wsp = {}
