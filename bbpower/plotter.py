@@ -15,8 +15,8 @@ class BBPlotter(PipelineStage):
             ('cells_noise', FitsFile), ('cells_null', FitsFile),
             ('cells_fiducial', FitsFile), ('param_chains',NpzFile)]
     outputs=[('plots',DirFile), ('plots_page',HTMLFile)]
-    config_options={'lmax_plot':300, 'plot_coadded_total': True,
-                    'plot_noise': True, 'plot_nulls': True,
+    config_options={'lmax_plot':300, 'plot_coadded_total': False,
+                    'plot_noise': True, 'plot_nulls': False,
                     'plot_likelihood': True}
 
     def create_page(self):
