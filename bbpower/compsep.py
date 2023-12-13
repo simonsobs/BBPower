@@ -116,10 +116,6 @@ class BBCompSep(PipelineStage):
         self.s = sacc.Sacc.load_fits(self.get_input('cells_coadded'))
         self.s_cov = sacc.Sacc.load_fits(self.get_input('cells_coadded_cov'))
         tr_comb = self.s.get_tracer_combinations()
-        for tr1, tr2 in tr_comb:
-            ind1 = self.s.indices(data_type='cl_bb', tracers=(tr1, tr2))
-            ind2 = self.s_cov.indices(data_type='cl_bb', tracers=(tr1, tr2))
-            assert np.all(ind1 == ind2), "Covariance sacc ordering is wrong"
         if self.use_handl:
             s_fid = sacc.Sacc.load_fits(self.get_input('cells_fiducial'))
             s_noi = sacc.Sacc.load_fits(self.get_input('cells_noise'))
@@ -150,6 +146,18 @@ class BBCompSep(PipelineStage):
             s_fid.remove_selection(ell__lt=self.config['l_min'])
             s_noi.remove_selection(ell__gt=self.config['l_max'])
             s_noi.remove_selection(ell__lt=self.config['l_min'])
+
+        for tr1, tr2 in tr_comb:
+            ind1 = self.s.indices(data_type='cl_bb', tracers=(tr1, tr2))
+            ind2 = self.s_cov.indices(data_type='cl_bb', tracers=(tr1, tr2))
+            assert np.all(ind1 == ind2), "Covariance sacc ordering is wrong"
+            if self.use_handl:
+                ind3 = self.s_fid.indices(data_type='cl_bb',
+                                          tracers=(tr1, tr2))
+                ind4 = self.s_noi.indices(data_type='cl_bb',
+                                          tracers=(tr1, tr2))
+                assert np.all(ind1 == ind3), "Fiducial sacc ordering is wrong"
+                assert np.all(ind1 == ind4), "Noise sacc ordering is wrong"
 
         if self.config['bands'] == 'all':
             tr_names = sorted(list(self.s.tracers.keys()))
@@ -827,13 +835,15 @@ class BBCompSep(PipelineStage):
                      names=self.params.p_free_names)
         elif self.config.get('sampler') == 'maximum_likelihood':
             sampler = self.minimizer()
-            #chi2 = -2*self.lnprob(sampler)
-            chi2 = -2*self.lnlike(sampler) # NEW TEST (6/7/23)
-            #np.savez(self.get_output('output_dir')+'/chi2.npz',
-            np.savez(self.get_output('output_dir')+'/chi2_like.npz',  # NEW TEST (6/7/23)
-                     params=sampler,
-                     names=self.params.p_free_names,
-                     chi2=chi2, ndof=len(self.bbcovar))
+            chi2 = -2*self.lnprob(sampler)
+            kwargs = {"params" : sampler,
+                        "names" : self.params.p_free_names,
+                        "chi2" : chi2,
+                        "ndof" : len(self.bbcovar)}
+            np.savez(self.get_output('output_dir')+'/chi2.npz', **kwargs)
+            with open(self.get_output('output_dir')+'/chi2.txt', 'w') as f:
+                for key, value in kwargs.items():
+                    f.write('%s: %s\n' % (key, value))
             print("Best fit:")
             for n, p in zip(self.params.p_free_names, sampler):
                 print(n+" = %.3lE" % p)
