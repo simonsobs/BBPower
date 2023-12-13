@@ -12,12 +12,13 @@ import os
 class BBPlotter(PipelineStage):
     name="BBPlotter"
     inputs=[('cells_coadded_total', FitsFile), ('cells_coadded', FitsFile),
-            ('cells_noise', FitsFile), ('cells_null', FitsFile),
+            ('cells_noise', FitsFile), ('cells_cov', FitsFile),
+            ('cells_null', FitsFile),
             ('cells_fiducial', FitsFile), ('param_chains',NpzFile)]
     outputs=[('plots',DirFile), ('plots_page',HTMLFile)]
-    config_options={'lmax_plot':300, 'plot_coadded_total': False,
-                    'plot_noise': True, 'plot_nulls': False,
-                    'plot_likelihood': True}
+    config_options={'lmin_plot': 20, 'lmax_plot': 300, 'plot_coadded_total': False,
+                    'plot_noise': False, 'plot_nulls': False,
+                    'plot_likelihood': False}
 
     def create_page(self):
         # Open plots directory
@@ -79,14 +80,14 @@ class BBPlotter(PipelineStage):
         with self.doc:
             dtg.h2("Coadded power spectra",id='coadded')
             lst=dtg.ul()
-            pols = ['e', 'b']
-            print(self.s_fid.tracers)
+            # pols = ['e', 'b']
+            pols = ['b']
             for t1, t2 in self.s_cd_x.get_tracer_combinations():
-                for p1 in range(2):
+                for p1 in range(len(pols)):
                     if t1==t2:
-                        p2range = range(p1, 2)
+                        p2range = range(p1, len(pols))
                     else:
-                        p2range = range(2)
+                        p2range = range(len(pols))
                     for p2 in p2range:
                         x = pols[p1] + pols[p2]
                         typ = 'cl_' + x
@@ -99,29 +100,28 @@ class BBPlotter(PipelineStage):
                         plt.figure()
                         plt.title(title, fontsize=14)
                         l, cl = self.s_fid.get_ell_cl(typ, t1, t2)
-                        plt.plot(l[l<self.lmx], cl[l<self.lmx], 'k-', label='Fiducial model')
+                        plt.plot(l[l<self.l_max], cl[l<self.l_max], 'k-', label='Fiducial model')
+                        _, _, cov = self.s_cov.get_ell_cl(typ, t1, t2, return_cov=True)
                         if self.config['plot_coadded_total']:
-                            l, cl, cov = self.s_cd_t.get_ell_cl(typ, t1, t2, return_cov=True)
-                            msk = l<self.lmx
-                            el = np.sqrt(np.fabs(np.diag(cov)))[msk]
-                            plt.errorbar(l[msk], cl[msk], yerr=el, fmt='ro',
+                            l, cl = self.s_cd_t.get_ell_cl(typ, t1, t2, return_cov=False)
+                            el = np.sqrt(np.fabs(np.diag(cov)))
+                            plt.errorbar(l, cl, yerr=el, fmt='ro',
                                          label='Total coadd')
-                            eb=plt.errorbar(l[msk]+1, -cl[msk], yerr=el, fmt='ro', mfc='white')
+                            eb=plt.errorbar(l+1, -cl, yerr=el, fmt='ro', mfc='white')
                             eb[-1][0].set_linestyle('--')
                         if self.config['plot_noise']:
-                            l, cl, cov = self.s_cd_n.get_ell_cl(typ, t1, t2, return_cov=True)
-                            msk = l<self.lmx
-                            el = np.sqrt(np.fabs(np.diag(cov)))[msk]
-                            plt.errorbar(l[msk], cl[msk], yerr=el, fmt='yo',
+                            l, cl = self.s_cd_n.get_ell_cl(typ, t1, t2, return_cov=False)
+                            el = np.sqrt(np.fabs(np.diag(cov)))
+                            plt.errorbar(l, cl, yerr=el, fmt='yo',
                                          label='Noise')
-                            eb=plt.errorbar(l[msk]+1, -cl[msk], yerr=el, fmt='yo', mfc='white')
+                            eb=plt.errorbar(l+1, -cl, yerr=el, fmt='yo', mfc='white')
                             eb[-1][0].set_linestyle('--')
-                        l, cl, cov = self.s_cd_x.get_ell_cl(typ, t1, t2, return_cov=True)
-                        msk = l<self.lmx
-                        el = np.sqrt(np.fabs(np.diag(cov)))[msk]
-                        plt.errorbar(l[msk], cl[msk], yerr=el, fmt='bo',
+                        l, cl = self.s_cd_x.get_ell_cl(typ, t1, t2, return_cov=False)
+                        el = np.sqrt(np.fabs(np.diag(cov)))
+                        plt.errorbar(l, cl, yerr=el, fmt='bo',
                                      label='Cross-coadd')
-                        eb=plt.errorbar(l[msk]+1, -cl[msk], yerr=el, fmt='bo', mfc='white')
+                        eb=plt.errorbar(l+1, -cl, yerr=el, fmt='bo',
+                                        mfc='white')
                         eb[-1][0].set_linestyle('--')
                         plt.yscale('log')
                         plt.xlabel('$\\ell$',fontsize=15)
@@ -154,9 +154,8 @@ class BBPlotter(PipelineStage):
                         x = pols[p1] + pols[p2]
                         typ='cl_'+x
                         l, cl, cv = self.s_null.get_ell_cl(typ, t1, t2, return_cov=True)
-                        msk = l<self.lmx
-                        el = np.sqrt(np.fabs(np.diag(cv)))[msk]
-                        plt.errorbar(l[msk], cl[msk]/el,
+                        el = np.sqrt(np.fabs(np.diag(cv)))
+                        plt.errorbar(l, cl/el,
                                      yerr=np.ones_like(el),
                                      fmt=self.cols_typ[x]+'-', label=x)
                 plt.xlabel('$\\ell$',fontsize=15)
@@ -231,26 +230,49 @@ class BBPlotter(PipelineStage):
 
     def read_inputs(self):
         print("Reading inputs")
+
         # Power spectra
         self.s_fid=sacc.Sacc.load_fits(self.get_input('cells_fiducial'))
         self.s_cd_x=sacc.Sacc.load_fits(self.get_input('cells_coadded'))
+        self.s_cov=sacc.Sacc.load_fits(self.get_input('cells_cov'))
+        s_list = [self.s_fid, self.s_cd_x, self.s_cov]
+        assert self.s_cov.has_covariance(), "s_cov has no covariance"
         if self.config['plot_coadded_total']:
             self.s_cd_t=sacc.Sacc.load_fits(self.get_input('cells_coadded_total'))
+            s_list.append(self.s_cd_t)
         if self.config['plot_noise']:
             self.s_cd_n=sacc.Sacc.load_fits(self.get_input('cells_noise'))
+            s_list.append(self.s_cd_n)
         if self.config['plot_nulls']:
             self.s_null=sacc.Sacc.load_fits(self.get_input('cells_null'))
+            s_list.append(self.s_null)
+
+        self.l_min = self.config['lmin_plot']
+        self.l_max = self.config['lmax_plot']
+
+        for s in s_list:
+            # Keep only desired correlations
+            corr_all = ['cl_ee', 'cl_eb', 'cl_be', 'cl_bb']
+            corr_keep = ['cl_ee', 'cl_eb', 'cl_be', 'cl_bb']
+            for c in corr_all:
+                if c not in corr_keep:
+                    s.remove_selection(c)
+            # Scale cuts
+            s.remove_selection(ell__gt=self.l_max)
+            s.remove_selection(ell__lt=self.l_min)
+
         # Chains
         if self.config['plot_likelihood']:
-            self.chain=np.load(self.get_input('param_chains'))
+            self.chain=np.load(self.get_input('param_chains'),
+                               allow_pickle=True)
 
         self.cols_typ={'ee':'r','eb':'g','be':'y','bb':'b'}
-        self.lmx = self.config['lmax_plot']
+
 
     def run(self):
         self.read_inputs()
         self.create_page()
-        self.add_bandpasses()
+        # self.add_bandpasses()
         self.add_coadded()
         if self.config['plot_nulls']:
             self.add_nulls()

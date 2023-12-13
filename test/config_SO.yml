@@ -1,6 +1,6 @@
 # These parameters are accessible to all stages
 global:
-    nside: 512
+    nside: 256
     compute_dell: True
 
 BBPowerSpecter:
@@ -23,7 +23,7 @@ BBPowerSummarizer:
 BBCompSep:
     # Sampler type (choose 'emcee', 'polychord', 'maximum_likelihood', 
     # 'single_point' or 'timing')
-    sampler: 'fisher'
+    sampler: 'maximum_likelihood'
     # If you chose polychord:
     nlive: 50
     nrepeat: 50
@@ -46,8 +46,10 @@ BBCompSep:
     cmb_model:
         # Template power spectrum. Should contained the lensed power spectra
         # with r=0 and r=1 respectively.
+        # cmb_templates: ['/global/homes/k/kwolz/bbdev/BBSims/data/camb_lens_nobb.dat',
+        #                 '/global/homes/k/kwolz/bbdev/BBSims/data/camb_lens_r1.dat']
         cmb_templates: ['/pscratch/sd/k/kwolz/BBPower/examples/data/camb_lens_nobb_nico.dat',
-                        '/pscratch/sd/k/kwolz/BBPower/examples/data/camb_lens_r1_nico.dat']
+                       '/pscratch/sd/k/kwolz/BBPower/examples/data/camb_lens_r1_nico.dat']
         # Free parameters
         params:
             # tensor-to-scalar ratio
@@ -132,10 +134,3 @@ BBCompSep:
                     alpha_s_bb: ['alpha', 'tophat', [-2., -0.93, 0.]]
                     #alpha_s_bb: ['alpha', 'fixed', [0.]]
                     l0_s_bb: ['ell0', 'fixed', [80.]]
-
-BBPlotter:
-    lmax_plot: 300
-    plot_coadded_total: False
-    plot_noise: False
-    plot_nulls: False
-    plot_likelihood: True

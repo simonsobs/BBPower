@@ -135,6 +135,7 @@ BBCompSep:
                     l0_s_bb: ['ell0', 'fixed', [80.]]
 
 BBPlotter:
+    lmin_plot: 30
     lmax_plot: 300
     plot_coadded_total: False
     plot_noise: False
