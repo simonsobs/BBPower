@@ -34,7 +34,7 @@ BBCompSep:
     pol_channels: ['B']
     # Scale cuts (will apply to all frequencies)
     l_min: 30
-    l_max: 300
+    l_max: 120
 
     # CMB model
     cmb_model:
@@ -117,7 +117,7 @@ BBCompSep:
                     l0_s_bb: ['ell0', 'fixed', [80.]]
 
 BBPlotter:
-    lmax_plot: 300
+    lmax_plot: 128
     plot_coadded_total: False
     plot_noise: False
     plot_nulls: False

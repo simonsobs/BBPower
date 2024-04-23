@@ -55,7 +55,7 @@ This stage takes a set of coadded multi-frequency polarization power spectra and
 - `cells_fiducial`: a fits file containing multi-frequency and multi-polarization power spectra for a model that should roughly resemble the data (e.g. the model used to generate the simulations in the previous stages). This is only needed if you're using the Hamimeche & Lewis likelihood.
 
 ### Output
-- `param_chains`: a numpy `npz` file containing the parameter MCMC chain.
+- `output_dir`: a directory containing the parameter MCMC chain.
 
 ### Parameters
 See [test/test_config_sampling.yml](test/test_config_sampling.yml)
@@ -78,3 +78,16 @@ This stage generates a webpage containing a set of plots illustrating the main p
 
 ### Parameters
 See [test/test_config_sampling.yml](test/test_config_sampling.yml)
+
+## 5. BBEllwise
+### Stage summary
+This stage saves the CMB bandpowers inferred by the ellwise sampler, implemented in BBCompSep. It optionally validates the results by re-inserting the bandpowers in a CMB-only likelihood, inferring r and A_lens, and comparing those results with r and A_lens inferred by the default pipeline.
+
+### Inputs
+- `default_chain`: either a `npz`, or a `stats` file containing the output from the default (non-ellwise) sampler.
+
+### Outputs
+- `output_dir`: a directory containing the input (!) and output chains, as well as the resulting bandpowers from the ellwise CMB sampler.
+
+### Parameters
+See [test/test_config_ellwise.yml](test/test_config_ellwise.yml)

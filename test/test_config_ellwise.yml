@@ -17,15 +17,14 @@ BBPowerSummarizer:
     data_covar_diag_order: 0
 
 BBCompSep:
-    # Sampler type (choose 'emcee', 'polychord', 'maximum_likelihood', 
-    # 'single_point' or 'timing')
-    sampler: 'polychord'
+    # Sampler type (choose 'emcee' or 'polychord' for ellwise compsep)
+    sampler: 'emcee'
     # If you chose polychord:
     nlive: 50
     nrepeat: 50
-    # If you chose emcee:
-    nwalkers: 24
-    n_iters: 1000
+    # If you chose emcee (note higher nwalkers for ellwise compsep):
+    nwalkers: 96
+    n_iters: 5000
     # Likelihood type (choose 'chi2' or 'h&l')
     likelihood_type: 'chi2'
     # What is the starting point?
@@ -38,17 +37,26 @@ BBCompSep:
 
     # CMB model
     cmb_model:
+        # Inference targets CMB bandpowers
+        use_ellwise: True
         # Template power spectrum. Should contained the lensed power spectra
         # with r=0 and r=1 respectively.
         cmb_templates: ["./examples/data/camb_lens_nobb.dat", 
                         "./examples/data/camb_lens_r1.dat"]
         # Free parameters
         params:
-            # tensor-to-scalar ratio
-            # See below for the meaning of the different elements in the list.
-            r_tensor: ['r_tensor', 'tophat', [-0.1, 0.00, 0.1]]
-            # Lensing amplitude
-            A_lens: ['A_lens', 'tophat', [0.00, 1.0, 2.00]]
+            # CMB bandpower amplitudes. This assumes 9 bandpowers with 
+            # delta_ell = 10, ell in [30, 120]. 
+            # Append more parameters if needed.
+            A_cmb_01: ['A_cmb_01', 'tophat', [0.,1.,2.]]
+            A_cmb_02: ['A_cmb_02', 'tophat', [0.,1.,2.]]
+            A_cmb_03: ['A_cmb_03', 'tophat', [0.,1.,2.]]
+            A_cmb_04: ['A_cmb_04', 'tophat', [0.,1.,2.]]
+            A_cmb_05: ['A_cmb_05', 'tophat', [0.,1.,2.]]
+            A_cmb_06: ['A_cmb_06', 'tophat', [0.,1.,2.]]
+            A_cmb_07: ['A_cmb_07', 'tophat', [0.,1.,2.]]
+            A_cmb_08: ['A_cmb_08', 'tophat', [0.,1.,2.]]
+            A_cmb_09: ['A_cmb_09', 'tophat', [0.,1.,2.]]
 
     # Foreground model
     fg_model:
@@ -116,9 +124,13 @@ BBCompSep:
                     alpha_s_bb: ['alpha', 'tophat', [-1., -0.4, 0.]]
                     l0_s_bb: ['ell0', 'fixed', [80.]]
 
-BBPlotter:
-    lmax_plot: 128
-    plot_coadded_total: True
-    plot_noise: True
-    plot_nulls: True
-    plot_likelihood: True
+BBEllwise:
+    # Sampler used by BBCompSep to produce ellwise chains ('emcee' or 'polychord')
+    sampler: 'emcee'
+    # Re-insert CMB amplitudes in sampler to check (r, A_lens)?
+    validation: True
+    fid_spec_r0: './examples/data/camb_lens_nobb.dat'
+    fid_spec_r1: './examples/data/camb_lens_r1.dat'
+    bin_edges_path: './examples/test_data/bpw_edges.txt'
+    lmin: 30
+    lmax: 120
