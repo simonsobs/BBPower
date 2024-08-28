@@ -208,7 +208,7 @@ def main(simsdir, seed):
     fdir_inhom = '/global/cfs/cdirs/sobs/users/krach/BBSims/NOISE_20210727'
     sdir = '/pscratch/sd/k/kwolz/BBPower/sims/nside512/'  # need trailing "/"
     sdir += sky + '/r0'
-    if r001:                   
+    if r001:
         sdir += '01'
     if Alens05:
         sdir += '_Alens05'
