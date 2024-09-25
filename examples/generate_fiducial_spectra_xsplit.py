@@ -170,15 +170,79 @@ def generate_SO_spectra(args):
                        window=s_wins)
 
     # Add covariance
+    n_split = 4
+    def is_cross(s1,f1,s2,f2):
+        """
+        Given two maps with split s1 frequence f1 and split s2 and frequency f2
+        Determine whether the power spectrum is cross spectrum.
+        """
+        if s1 != s2:
+            return True
+        else:
+            if f1 != f2:
+                return True
+            else:
+                return False
+    def get_cross_splits(f1,f2):
+        """
+        Given two frequency f1 and f2, get all map splits pairs that the power
+        spectrum only contain cross spectrum.
+        Return split pairs and total number of cross spectrum.
+        """
+        if f1 == f2:
+            # If freq are the same, then all cross pairs would have different
+            # split, so the number of total cross pairs is:
+            num_cross = n_split*(n_split-1)/2
+            split_pairs = np.triu_indices(n_split,1)
+            assert num_cross == split_pairs[0].size
+            return split_pairs, num_cross
+        else:
+            # If freq are different, then any split combination will be cross pair,
+            # so the number of total cross pairs is:
+            num_cross = n_split**2
+            split_pairs = np.triu_indices(n_split,-n_split)
+            assert num_cross == split_pairs[0].size
+            return split_pairs, num_cross
     print("  Adding covariance to sacc")
     cov_bpw = np.zeros([ncross, n_bins, ncross, n_bins])
     factor_modecount = 1./((2*lb + 1)*delta_ell*fsky)
-    for ii, (i1, i2) in enumerate(zip(indices_tr[0], indices_tr[1])):
-        for jj, (j1, j2) in enumerate(zip(indices_tr[0], indices_tr[1])):
-            # simple covariance matrix for quick tests
-            covar = (bpw_freq_tot[i1, j1, :]*bpw_freq_tot[i2, j2, :]
-                     + bpw_freq_tot[i1, j2, :]*bpw_freq_tot[i2, j1, :]) * factor_modecount  # noqa
-            cov_bpw[ii, :, jj, :] = np.diag(covar)
+    for ii, (m1, m2) in enumerate(zip(indices_tr[0], indices_tr[1])):
+        for jj, (m3, m4) in enumerate(zip(indices_tr[0], indices_tr[1])):
+            # frequency index of each map
+            f1 = m1//2
+            f2 = m2//2
+            f3 = m3//2
+            f4 = m4//2
+            split_pairs_12, num_cross_12 = get_cross_splits(f1,f2)
+            split_pairs_34, num_cross_34 = get_cross_splits(f3,f4)
+            for s_alpha, s_beta in zip(*split_pairs_12):
+                for s_mu, s_nu in zip(*split_pairs_34):
+                    if is_cross(s_alpha, f1, s_mu, f3):
+                        Cell_13 = bpw_freq_sig[m1,m3,:]
+                    else:
+                        Cell_13 = bpw_freq_tot[m1,m3,:]
+
+                    if is_cross(s_beta, f2, s_nu, f4):
+                        Cell_24 = bpw_freq_sig[m2,m4,:]
+                    else:
+                        Cell_24 = bpw_freq_tot[m2,m4,:]
+
+                    if is_cross(s_alpha, f1, s_nu, f4):
+                        Cell_14 = bpw_freq_sig[m1,m4,:]
+                    else:
+                        Cell_14 = bpw_freq_tot[m1,m4,:]
+
+                    if is_cross(s_beta, f2, s_mu, f3):
+                        Cell_23 = bpw_freq_sig[m2,m3,:]
+                    else:
+                        Cell_23 = bpw_freq_tot[m2,m3,:]
+
+                    cov_bpw[ii,:,jj,:] += np.diag(
+                            factor_modecount
+                            * (1/num_cross_12)
+                            * (1/num_cross_34)
+                            * ( Cell_13 * Cell_24 + Cell_14 * Cell_23)
+                            )
     cov_bpw = cov_bpw.reshape([ncross * n_bins, ncross * n_bins])
     s_d.add_covariance(cov_bpw)
 
