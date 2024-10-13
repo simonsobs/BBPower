@@ -77,11 +77,11 @@ class BBPowerSpecter(PipelineStage):
         if not os.path.isfile(ftest):
             ftest = ftest + '.gz'
         try:
-            hp.read_map(ftest, field=[0], verbose=False)
+            hp.read_map(ftest, field=[0])
         except:
             raise ValueError(f'Map is not readable: {ftest}')
-        try:    
-            hp.read_map(ftest, field=[17], verbose=False)
+        try:
+            hp.read_map(ftest, field=[17])
         except:
             has_tqu = False
         fields = {}
@@ -95,11 +95,9 @@ class BBPowerSpecter(PipelineStage):
                 if not os.path.isfile(fname):
                     raise ValueError("Can't find file ", splits_list[s])
                 if has_tqu:
-                    mp_q, mp_u = hp.read_map(fname, field=[3*b+1, 3*b+2], 
-                                             verbose=False)
+                    mp_q, mp_u = hp.read_map(fname, field=[3*b+1, 3*b+2])
                 else:
-                    mp_q, mp_u = hp.read_map(fname, field=[2*b, 2*b+1], 
-                                             verbose=False)
+                    mp_q, mp_u = hp.read_map(fname, field=[2*b, 2*b+1])
                 fields[name] = self.get_field(b, [mp_q, mp_u])
 
         # Iterate over field pairs
@@ -137,8 +135,7 @@ class BBPowerSpecter(PipelineStage):
     def read_masks(self, nbands):
         self.masks = []
         for i in range(nbands):
-            m = hp.read_map(self.get_input('masks_apodized'),
-                            verbose=False)
+            m = hp.read_map(self.get_input('masks_apodized'))
             self.masks.append(hp.ud_grade(m, nside_out=self.nside))
 
     def get_bandpowers(self):
