@@ -37,7 +37,10 @@ def get_sky_signals(nrs, r001, Alens05, foreground, nside, freq_labels, fdir,
         else:  # r=0 and Alens=1 (default)
             fname = f'{fdir}/CMB_r0_20201207/cmb/{nrs}/'
             fname += f'SO_SAT_{fl}_cmb_{nrs}_CMB_r0_20201207.fits'
-        skymaps[k] += hp.read_map(fname, field=range(3), verbose=False)
+        skymaps[k] += hp.ud_grade(
+            hp.read_map(fname, field=range(3), dtype=np.float32),
+            nside_out=nside
+        )
         for fgn in fgnames:
             if foreground == 'gaussian':
                 fname = f'{fdir}/FG_20201207/gaussian/foregrounds/{fgn}/{nrs}/'
@@ -49,7 +52,10 @@ def get_sky_signals(nrs, r001, Alens05, foreground, nside, freq_labels, fdir,
                 fname = f'{fdir}/FG_20201207/realistic/{foreground}/'
                 fname += f'foregrounds/{fgn}/'
                 fname += f'SO_SAT_{fl}_{fgn}_{foreground}_20201207.fits'
-            skymaps[k] += hp.read_map(fname, field=range(3), verbose=False)
+            skymaps[k] += hp.ud_grade(
+                hp.read_map(fname, field=range(3), dtype=np.float32),
+                nside_out=nside
+            )
     return skymaps
 
 
@@ -87,7 +93,10 @@ def get_noise(nrs, sp, sensitivity_mode, one_over_f, inhom, fdir_inhom, nside,
                     fname = f'{fdir_inhom}/baseline_pessimistic/{nrs}/'
                     fname += f'SO_SAT_{fl}_noise_split_{sp+1}of4_{nrs}_'
                     fname += 'baseline_pessimistic_20210727.fits'
-            noisemaps[k] += hp.read_map(fname, field=range(3), verbose=False)
+            noisemaps[k] += hp.ud_grade(
+                hp.read_map(fname, field=range(3), dtype=np.float32),
+                nside_out=nside
+            )
         else:
             noisemaps[k] = combine_noise_maps(int(nrs) + sp*500, int(fl),
                                               factors)
@@ -161,14 +170,14 @@ def run(sdir, nrs, r001, Alens05, sensitivity_mode, one_over_f, foreground,
     if 'full-opt-al1' in sdir:
         mask = 'full-opt-al1'
     if not overwrite and not os.path.isfile(sname):
-        hp.write_map(sname, skymaps.reshape(18, -1))
+        hp.write_map(sname, skymaps.reshape(18, -1), dtype=np.float32)
     for sp in range(4):
         noisemaps = get_noise(nrs, sp, sensitivity_mode, one_over_f, inhom,
                               fdir_inhom, nside, freq_labels, mask=mask)
         sname = f'{sdir}SO_SAT_obs_map_split_{sp+1}of4.fits'
         totalmaps = noisemaps + skymaps
         if not overwrite and not os.path.isfile(sname):
-            hp.write_map(sname, totalmaps.reshape(18, -1))
+            hp.write_map(sname, totalmaps.reshape(18, -1), dtype=np.float32)
     return
 
 
@@ -201,12 +210,12 @@ def main(simsdir, seed):
     if ('Alens05' in simsdir.split('/')[-4]) or ('Alens05' in simsdir.split('/')[-5]):  # noqa
         Alens05 = True
 
-    nside = 512
+    nside = 256
     freq_labels = ['27', '39', '93', '145', '225', '280']
     fgnames = ['synch', 'dust']
     fdir = '/global/cfs/cdirs/sobs/users/krach/BBSims'
     fdir_inhom = '/global/cfs/cdirs/sobs/users/krach/BBSims/NOISE_20210727'
-    sdir = '/pscratch/sd/k/kwolz/BBPower/sims/nside512/'  # need trailing "/"
+    sdir = f'/pscratch/sd/k/kwolz/BBPower/sims/nside{nside}/'  # need trailing "/"  # noqa
     sdir += sky + '/r0'
     if r001:
         sdir += '01'
