@@ -21,18 +21,21 @@ class BBCompSep(PipelineStage):
     inputs = [('cells_coadded', FitsFile),
               ('cells_noise', FitsFile),
               ('cells_fiducial', FitsFile),
+              ('cells_coadded_cov', FitsFile),
               ('analytic_temp_BB', TextFile)]
     outputs = [('output_dir', DirFile),
                ('config_copy', YamlFile)]
     config_options = {'likelihood_type': 'h&l', 'n_iters': 32,
                       'nwalkers': 16, 'r_init': 1.e-3,
-                      'sampler': 'emcee', 'bands': 'all'}
+                      'sampler': 'emcee', 'bands': 'all',
+                      'resume': False}
 
     def setup_compsep(self):
         """
         Pre-load the data, CMB BB power spectrum, and foreground models.
         """
         self.delensing = self.config['delensing']
+        print('Delensing: ',self.delensing)
         self.parse_sacc_file()
         if self.config['fg_model'].get('use_moments'):
             self.precompute_w3j()
@@ -116,12 +119,19 @@ class BBCompSep(PipelineStage):
 
         # Read data
         self.s = sacc.Sacc.load_fits(self.get_input('cells_coadded'))
+        self.s_cov = sacc.Sacc.load_fits(self.get_input('cells_coadded_cov'))
+        tr_comb = self.s.get_tracer_combinations()
+        for tr1, tr2 in tr_comb:
+            ind1 = self.s.indices(data_type='cl_bb', tracers=(tr1, tr2))
+            ind2 = self.s_cov.indices(data_type='cl_bb', tracers=(tr1, tr2))
+            assert np.all(ind1 == ind2), "Covariance sacc ordering is wrong"
         if self.use_handl:
             s_fid = sacc.Sacc.load_fits(self.get_input('cells_fiducial'))
             s_noi = sacc.Sacc.load_fits(self.get_input('cells_noise'))
 
         # Keep only desired correlations
         self.pols = self.config['pol_channels']
+        print('self.pols: ',self.pols)
         corr_all = ['cl_ee', 'cl_eb', 'cl_be', 'cl_bb']
         corr_keep = []
         for m1 in self.pols:
@@ -131,6 +141,7 @@ class BBCompSep(PipelineStage):
         for c in corr_all:
             if c not in corr_keep:
                 self.s.remove_selection(c)
+                self.s_cov.remove_selection(c)
                 if self.use_handl:
                     s_fid.remove_selection(c)
                     s_noi.remove_selection(c)
@@ -138,6 +149,8 @@ class BBCompSep(PipelineStage):
         # Scale cuts
         self.s.remove_selection(ell__gt=self.config['l_max'])
         self.s.remove_selection(ell__lt=self.config['l_min'])
+        self.s_cov.remove_selection(ell__gt=self.config['l_max'])
+        self.s_cov.remove_selection(ell__lt=self.config['l_min'])
         if self.use_handl:
             s_fid.remove_selection(ell__gt=self.config['l_max'])
             s_fid.remove_selection(ell__lt=self.config['l_min'])
@@ -146,11 +159,15 @@ class BBCompSep(PipelineStage):
 
         if self.config['bands'] == 'all':
             tr_names = sorted(list(self.s.tracers.keys()))
+            print('bands=all')
+            print('s.tracers: ',list(self.s.tracers.keys()))
         else:
             tr_names = self.config['bands']
             if self.delensing:
                 tr_names.append('temp')
         self.n_channels = len(tr_names)
+        print('self.n_channels: ',self.n_channels)
+        print('Tracer names: ',tr_names)
         if self.delensing:
             self.n_channels_del = self.n_channels
             self.nfreqs = self.n_channels-1
@@ -159,6 +176,7 @@ class BBCompSep(PipelineStage):
             self.nfreqs = self.n_channels
         self.npol = len(self.pols)
         self.nmaps = self.n_channels * self.npol
+        print('self.nmaps: ',self.nmaps)
         self.index_ut = np.triu_indices(self.nmaps)
         self.ncross = (self.nmaps * (self.nmaps + 1)) // 2
         self.pol_order = dict(zip(self.pols, range(self.npol)))
@@ -193,7 +211,11 @@ class BBCompSep(PipelineStage):
 
         # Get power spectra and covariances
         if self.config['bands'] == 'all':
-            if not (self.s.covariance.covmat.shape[-1] == len(self.s.mean) == self.n_bpws * self.ncross):
+            if not (self.s_cov.covariance.covmat.shape[-1] == len(self.s.mean) == self.n_bpws * self.ncross):
+                print('n_bpw: ',self.n_bpws)
+                print('ncross: ',self.ncross)
+                print('Len s.mean: ',len(self.s.mean))
+                print('Covmat shape[-1]: ',self.s_cov.covariance.covmat.shape[-1])
                 raise ValueError("C_ell vector's size is wrong")
 
         v2d = np.zeros([self.n_bpws, self.ncross])
@@ -231,7 +253,7 @@ class BBCompSep(PipelineStage):
                 pol2b = self.pols[p2b].lower()
                 cl_typb = f'cl_{pol1b}{pol2b}'
                 ind_b = self.s.indices(cl_typb, (t1b, t2b))
-                cv2d[:, ind_vec, :, ind_vecb] = self.s.covariance.covmat[ind_a][:, ind_b]
+                cv2d[:, ind_vec, :, ind_vecb] = self.s_cov.covariance.covmat[ind_a][:, ind_b]
 
         # Store data
         self.bbdata = self.vector_to_matrix(v2d)
@@ -667,15 +689,15 @@ class BBCompSep(PipelineStage):
         except AttributeError:
             found_file = False
 
-        if not found_file:
+        if found_file and self.config['resume']:
+            print("Restarting from previous run")
+            pos = None
+            nsteps_use = max(n_iters-nchain, 0)
+        else:
             backend.reset(nwalkers, ndim)
             pos = [self.params.p0 + 1.e-3*np.random.randn(ndim)
                    for i in range(nwalkers)]
             nsteps_use = n_iters
-        else:
-            print("Restarting from previous run")
-            pos = None
-            nsteps_use = max(n_iters-nchain, 0)
 
         with Pool() as pool:
             import time
@@ -724,7 +746,7 @@ class BBCompSep(PipelineStage):
         settings.boost_posterior = 10  # Increase number of posterior samples
         settings.nprior = 200          # Draw nprior initial prior samples
         settings.maximise = True       # Maximize posterior at the end
-        settings.read_resume = False   # Read from resume file of earlier run
+        settings.read_resume = self.config['resume']   # Resume for earlier run
         settings.feedback = 2          # Verbosity {0,1,2,3}
 
         output = pypolychord.run_polychord(likelihood, ndim, nder, settings, 
@@ -835,6 +857,8 @@ class BBCompSep(PipelineStage):
         elif self.config.get('sampler') == 'maximum_likelihood':
             sampler = self.minimizer()
             chi2 = -2*self.lnprob(sampler)
+            # chi2 = -2*self.lnlike(sampler) # New test (6/7/23)
+            # np.savez(self.get_output('output_dir')+'/chi2_like.npz',  # NEW TEST (6/7/23)
             np.savez(self.get_output('output_dir')+'/chi2.npz',
                      params=sampler,
                      names=self.params.p_free_names,

@@ -9,9 +9,9 @@ import dominate as dom
 import dominate.tags as dtg
 import os
 
-class BBPlotter(PipelineStage):
-    name="BBPlotter"
-    inputs=[('cells_coadded_total', FitsFile), ('cells_coadded', FitsFile),
+class BBPlotter_mod(PipelineStage):
+    name="BBPlotter_mod"
+    inputs=[('cells_bestfit', FitsFile), ('cells_fit_r0', FitsFile), ('cells_coadded_total', FitsFile), ('cells_coadded', FitsFile),
             ('cells_noise', FitsFile), ('cells_coadded_total_cov', FitsFile), ('cells_coadded_cov', FitsFile),
             ('cells_noise_cov', FitsFile), ('cells_null', FitsFile),
             ('cells_fiducial', FitsFile), ('param_chains',NpzFile)]
@@ -100,32 +100,34 @@ class BBPlotter(PipelineStage):
                         print(fname)
                         plt.figure()
                         plt.title(title, fontsize=14)
-                        l, cl = self.s_fid.get_ell_cl(typ, t1, t2)
-                        plt.plot(l[l<self.lmx], cl[l<self.lmx], 'k-', label='Fiducial model')
-                        if self.config['plot_coadded_total']:
-                            l, cl  = self.s_cd_t.get_ell_cl(typ, t1, t2, return_cov=False)
-                            _,_,cov = self.s_cd_t_cov.get_ell_cl(typ, t1, t2, return_cov=True)
-                            msk = l<self.lmx
-                            el = np.sqrt(np.fabs(np.diag(cov)))[msk]
-                            plt.errorbar(l[msk], cl[msk], yerr=el, fmt='ro',
-                                         label='Total coadd')
-                            eb=plt.errorbar(l[msk]+1, -cl[msk], yerr=el, fmt='ro', mfc='white')
-                            eb[-1][0].set_linestyle('--')
-                        if self.config['plot_noise']:
-                            l, cl  = self.s_cd_n.get_ell_cl(typ, t1, t2, return_cov=False)
-                            _, _, cov = self.s_cd_n_cov.get_ell_cl(typ, t1, t2, return_cov=True)
-                            msk = l<self.lmx
-                            el = np.sqrt(np.fabs(np.diag(cov)))[msk]
-                            plt.errorbar(l[msk], cl[msk], yerr=el, fmt='yo',
-                                         label='Noise')
-                            eb=plt.errorbar(l[msk]+1, -cl[msk], yerr=el, fmt='yo', mfc='white')
-                            eb[-1][0].set_linestyle('--')
+                        # Fiducial model (true values)
+                        #l, cl = self.s_fid.get_ell_cl(typ, t1, t2)
+                        #plt.plot(l[l<self.lmx], cl[l<self.lmx], 'k-', label='Fiducial model')
+                        # Best-fit model (with potentially wrong r)
+                        l, cl = self.s_bestfit.get_ell_cl(typ, t1, t2)
+                        plt.plot(l[l<self.lmx], cl[l<self.lmx], 'r-', label='Best-fit to noiseless mean')
+                        # Best-fit foreground model (with r=0)
+                        #_, cl = self.s_fit_r0.get_ell_cl(typ, t1, t2)
+                        #plt.plot(l[l<self.lmx], cl[l<self.lmx], 'b-', label='Best-fit FG model, r=0')
+                        # Best-fit model (with potentially wrong r) to theory+d0s0
+                        l, cl = self.s_bestfit_theory.get_ell_cl(typ, t1, t2)
+                        plt.plot(l[l<self.lmx], cl[l<self.lmx], 'b-', label='Best-fit to theory+d0s0')
+                        # Cross-coadd (mean)
                         l, cl = self.s_cd_x.get_ell_cl(typ, t1, t2, return_cov=False)
                         _, _, cov = self.s_cd_x_cov.get_ell_cl(typ, t1, t2, return_cov=True)
                         msk = l<self.lmx
                         el = np.sqrt(np.fabs(np.diag(cov)))[msk]
+                        plt.errorbar(l[msk], cl[msk], yerr=el, fmt='ro',
+                                     label='Cross-coadd noiseless mean')
+                        eb=plt.errorbar(l[msk]+1, -cl[msk], yerr=el, fmt='ro', mfc='white')
+                        eb[-1][0].set_linestyle('--')
+                        # Theory+d0s0
+                        l, cl = self.s_cd_x_theory.get_ell_cl(typ, t1, t2, return_cov=False)
+                        _, _, cov = self.s_cd_x_cov.get_ell_cl(typ, t1, t2, return_cov=True)
+                        msk = l<self.lmx
+                        el = np.sqrt(np.fabs(np.diag(cov)))[msk]
                         plt.errorbar(l[msk], cl[msk], yerr=el, fmt='bo',
-                                     label='Cross-coadd')
+                                     label='Cross-coadd theory+d0s0')
                         eb=plt.errorbar(l[msk]+1, -cl[msk], yerr=el, fmt='bo', mfc='white')
                         eb[-1][0].set_linestyle('--')
                         plt.xlim([min(l[msk]),max(l[msk])])
@@ -199,7 +201,7 @@ class BBPlotter(PipelineStage):
                     'gamma_s_beta':'\\gamma_s'}
             # TODO: we need to build this from the priors, I think.
             truth={'A_lens':1.,
-                   'r_tensor':0., #0.01, # NONZERO r CASE
+                   'r_tensor':0.,
                    'beta_d':1.54,
                    'epsilon_ds':0.,
                    'alpha_d_bb':-0.16, #-0.33,#-0.16,
@@ -249,7 +251,11 @@ class BBPlotter(PipelineStage):
         print("Reading inputs")
         # Power spectra
         self.s_fid=sacc.Sacc.load_fits(self.get_input('cells_fiducial'))
+        self.s_bestfit=sacc.Sacc.load_fits(self.get_input('cells_bestfit'))
+        self.s_fit_r0=sacc.Sacc.load_fits(self.get_input('cells_fit_r0'))
         self.s_cd_x=sacc.Sacc.load_fits(self.get_input('cells_coadded'))
+        self.s_cd_x_theory = sacc.Sacc.load_fits('/pscratch/sd/e/emilie_h/BBPower_final/Bias_test_d0s0/Theory_d0s0/cells_coadded.fits')
+        self.s_bestfit_theory = sacc.Sacc.load_fits('/pscratch/sd/e/emilie_h/BBPower_final/Bias_test_d0s0/Theory_d0s0/cells_bestfit.fits')
         self.s_cd_x_cov=sacc.Sacc.load_fits(self.get_input('cells_coadded_cov'))
         if self.config['plot_coadded_total']:
             self.s_cd_t=sacc.Sacc.load_fits(self.get_input('cells_coadded_total'))
@@ -262,7 +268,8 @@ class BBPlotter(PipelineStage):
         # Chains
         if self.config['plot_likelihood']:
             self.chain=np.load(self.get_input('param_chains'))
-
+        
+        print('self.config: ',self.config)
         self.pols = self.config['pol_channels']
         self.npols = len(self.pols)
         self.cols_typ={'ee':'r','eb':'g','be':'y','bb':'b'}

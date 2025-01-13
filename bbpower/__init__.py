@@ -3,3 +3,4 @@ from .power_specter import BBPowerSpecter  # noqa
 from .power_summarizer import BBPowerSummarizer  # noqa
 from .compsep import BBCompSep  # noqa
 from .plotter import BBPlotter  # noqa
+from .plotter_mod import BBPlotter_mod  # noqa

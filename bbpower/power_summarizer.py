@@ -13,7 +13,9 @@ class BBPowerSummarizer(PipelineStage):
     config_options = {'nulls_covar_type': 'diagonal',
                       'nulls_covar_diag_order': 0,
                       'data_covar_type': 'block_diagonal',
-                      'data_covar_diag_order': 3}
+                      'data_covar_diag_order': 3,
+                      'do_covar': True,
+                      'do_nulls': False}
 
     def get_covariance_from_samples(self, v, s, covar_type='dense',
                                     off_diagonal_cut=0):
@@ -98,10 +100,11 @@ class BBPowerSummarizer(PipelineStage):
         # Read sorting and number of bandpowers
         self.check_sacc_consistency(self.s_splits)
         # Read file names for the power spectra of all simulations
-        with open(self.get_input('cells_all_sims')) as f:
-            content = f.readlines()
-        self.fname_sims = [x.strip() for x in content]
-        self.nsims = len(self.fname_sims)
+        if self.config['do_covar']:
+            with open(self.get_input('cells_all_sims')) as f:
+                content = f.readlines()
+            self.fname_sims = [x.strip() for x in content]
+            self.nsims = len(self.fname_sims)
         # Polarization indices and names
         self.index_pol = {'E': 0, 'B': 1}
         self.pol_names = ['E', 'B']
@@ -534,41 +537,45 @@ class BBPowerSummarizer(PipelineStage):
                                            with_windows=True)
 
         # Read simulations
-        print("Reading simulations")
-        sim_cd_t = np.zeros([self.nsims, len(summ['spectra'][0])])
-        sim_cd_x = np.zeros([self.nsims, len(summ['spectra'][1])])
-        sim_cd_n = np.zeros([self.nsims, len(summ['spectra'][2])])
-        sim_null = np.zeros([self.nsims, len(summ['spectra'][3])])
-        for i, fn in enumerate(self.fname_sims):
-            print(fn)
-            s = sacc.Sacc.load_fits(fn)
-            sb = self.parse_splits_sacc_file(s)
-            sim_cd_t[i, :] = sb['spectra'][0]
-            sim_cd_x[i, :] = sb['spectra'][1]
-            sim_cd_n[i, :] = sb['spectra'][2]
-            sim_null[i, :] = sb['spectra'][3]
+        #print("No need to read all sims")
+        if self.config['do_covar']:
+            print("Reading simulations")
+            sim_cd_t = np.zeros([self.nsims, len(summ['spectra'][0])])
+            sim_cd_x = np.zeros([self.nsims, len(summ['spectra'][1])])
+            sim_cd_n = np.zeros([self.nsims, len(summ['spectra'][2])])
+            sim_null = np.zeros([self.nsims, len(summ['spectra'][3])])
+            for i, fn in enumerate(self.fname_sims):
+                print(fn)
+                s = sacc.Sacc.load_fits(fn)
+                sb = self.parse_splits_sacc_file(s)
+                sim_cd_t[i, :] = sb['spectra'][0]
+                sim_cd_x[i, :] = sb['spectra'][1]
+                sim_cd_n[i, :] = sb['spectra'][2]
+                sim_null[i, :] = sb['spectra'][3]
 
-        sim_spectra_mean = np.mean(sim_cd_x,axis=0) # Average off-diagonal coadded spectra over all sims (useful to check that spectra aren't biased)
+            sim_spectra_mean = np.mean(sim_cd_x,axis=0) # Average off-diagonal coadded spectra over all sims (useful to check that spectra aren't biased)
 
-        # Compute covariance
-        print("Covariances")
-        dctyp = self.config['data_covar_type']
-        dcord = self.config['data_covar_diag_order']
-        self.get_covariance_from_samples(sim_cd_t, summ['saccs'][0],
-                                         covar_type=dctyp,
-                                         off_diagonal_cut=dcord)
-        self.get_covariance_from_samples(sim_cd_x, summ['saccs'][1],
-                                         covar_type=dctyp,
-                                         off_diagonal_cut=dcord)
-        self.get_covariance_from_samples(sim_cd_n, summ['saccs'][2],
-                                         covar_type=dctyp,
-                                         off_diagonal_cut=dcord)
-        # There are so many nulls that we'll probably run out of memory
-        nctyp = self.config['nulls_covar_type']
-        ncord = self.config['nulls_covar_diag_order']
-        self.get_covariance_from_samples(sim_null, summ['saccs'][3],
-                                         covar_type=nctyp,
-                                         off_diagonal_cut=ncord)
+            # Compute covariance
+            #print("Covariance taken from precomputed file")
+            print("Covariances")
+            dctyp = self.config['data_covar_type']
+            dcord = self.config['data_covar_diag_order']
+            self.get_covariance_from_samples(sim_cd_t, summ['saccs'][0],
+                                             covar_type=dctyp,
+                                             off_diagonal_cut=dcord)
+            self.get_covariance_from_samples(sim_cd_x, summ['saccs'][1],
+                                             covar_type=dctyp,
+                                             off_diagonal_cut=dcord)
+            self.get_covariance_from_samples(sim_cd_n, summ['saccs'][2],
+                                             covar_type=dctyp,
+                                             off_diagonal_cut=dcord)
+            if self.config['do_nulls']:
+                # There are so many nulls that we'll probably run out of memory
+                nctyp = self.config['nulls_covar_type']
+                ncord = self.config['nulls_covar_diag_order']
+                self.get_covariance_from_samples(sim_null, summ['saccs'][3],
+                                             covar_type=nctyp,
+                                             off_diagonal_cut=ncord)
 
         # Save data
         print("Writing output")
@@ -580,12 +587,13 @@ class BBPowerSummarizer(PipelineStage):
                                    overwrite=True)
         summ['saccs'][3].save_fits(self.get_output("cells_null"),
                                    overwrite=True)
-
-        print('Saving mean sims spectra')
-        summ['saccs'][1].mean = sim_spectra_mean
-        mean_dir = self.get_output("cells_coadded").rsplit('/',1)[0]
-        print('Directory: ',mean_dir)
-        summ['saccs'][1].save_fits(mean_dir+'/cells_mean_sims.fits', overwrite=True)
+        
+        if self.config['do_covar']:
+            print('Saving mean sims spectra')
+            summ['saccs'][1].mean = sim_spectra_mean
+            mean_dir = self.get_output("cells_coadded").rsplit('/',1)[0]
+            print('Directory: ',mean_dir)
+            summ['saccs'][1].save_fits(mean_dir+'/cells_mean_sims.fits', overwrite=True)
 
 if __name__ == '__main_':
     cls = PipelineStage.main()

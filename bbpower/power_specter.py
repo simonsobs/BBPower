@@ -23,7 +23,8 @@ class BBPowerSpecter(PipelineStage):
                ('mcm', DummyFile)]
     config_options = {'bpw_edges': None,
                       'purify_B': True,
-                      'n_iter': 3}
+                      'n_iter': 3,
+                      'all_sims': True}
 
     def init_params(self):
         self.nside = self.config['nside']
@@ -57,6 +58,18 @@ class BBPowerSpecter(PipelineStage):
     def compute_cells_from_splits(self, splits_list, temp_fname=None):
         # Generate fields
         print(" Generating fields")
+        has_tqu = True
+        ftest = splits_list[0]
+        if not os.path.isfile(ftest):
+            ftest = ftest + '.gz'
+        try:
+            hp.read_map(ftest, field=[0], verbose=False)
+        except:
+            raise ValueError(f'Map is not readable: {ftest}')
+        try:
+            hp.read_map(ftest, field=[17], verbose=False)
+        except:
+            has_tqu = False
         fields = {}
         for b in range(self.n_bpss):
             for s in range(self.nsplits):
@@ -67,8 +80,12 @@ class BBPowerSpecter(PipelineStage):
                     fname = fname + '.gz'
                 if not os.path.isfile(fname):
                     raise ValueError("Can't find file ", splits_list[s])
-                mp_q, mp_u = hp.read_map(fname, field=[2*b, 2*b+1],
-                                         verbose=False)
+                if has_tqu:
+                    mp_q, mp_u = hp.read_map(fname, field=[3*b+1, 3*b+2], 
+                                             verbose=False)
+                else:
+                    mp_q, mp_u = hp.read_map(fname, field=[2*b, 2*b+1], 
+                                             verbose=False)
                 fields[name] = self.get_field(b, [mp_q, mp_u])
 
         if self.delensing:
@@ -396,40 +413,41 @@ class BBPowerSpecter(PipelineStage):
                                self.get_output('cells_all_splits'),
                                with_windows=True)
         # Iterate over simulations
-        sims = []
-        with open(self.get_input('sims_list'), 'r') as f:
-            for dname in f:
-                sims.append(dname.strip())
+        if self.config['all_sims']:
+            sims = []
+            with open(self.get_input('sims_list'), 'r') as f:
+                for dname in f:
+                    sims.append(dname.strip())
 
-        # Write all output file names into a text file
-        fo = open(self.get_output('cells_all_sims'), 'w')
-        prefix_out = self.get_output('cells_all_splits')[:-5]
-        for isim, d in enumerate(sims):
-            fname = prefix_out + "_sim%d.fits" % isim
-            fo.write(fname+"\n")
-        fo.close()
+            # Write all output file names into a text file
+            fo = open(self.get_output('cells_all_sims'), 'w')
+            prefix_out = self.get_output('cells_all_splits')[:-5]
+            for isim, d in enumerate(sims):
+                fname = prefix_out + "_sim%d.fits" % isim
+                fo.write(fname+"\n")
+            fo.close()
 
-        for isim, d in enumerate(sims):
-            fname = prefix_out + "_sim%d.fits" % isim
-            if os.path.isfile(fname):
-                print("found " + fname)
-                continue
-            print("%d-th / %d simulation" % (isim+1, len(sims)))
-            #   Compute list of splits
-            sim_splits = [d+'/SO_SAT_obs_map_split_%dof%d.fits' % (i+1, self.nsplits)
-                          for i in range(self.nsplits)]
-            #   Compute all possible cross-power spectra
-            if self.delensing:
-                temp_name = temp_fname.split('/')[-1]
-                sim_temp = d+temp_name
-                cell_sim = self.compute_cells_from_splits(sim_splits, sim_temp)
-            else:
-                cell_sim = self.compute_cells_from_splits(sim_splits)
-            #   Save output
-            fname = prefix_out + "_sim%d.fits" % isim
-            self.save_cell_to_file(cell_sim,
-                                   self.tracers,
-                                   fname, with_windows=False)
+            for isim, d in enumerate(sims):
+                fname = prefix_out + "_sim%d.fits" % isim
+                if os.path.isfile(fname):
+                    print("found " + fname)
+                    continue
+                print("%d-th / %d simulation" % (isim+1, len(sims)))
+                #   Compute list of splits
+                sim_splits = [d+'/SO_SAT_obs_map_split_%dof%d.fits' % (i+1, self.nsplits)
+                              for i in range(self.nsplits)]
+                #   Compute all possible cross-power spectra
+                if self.delensing:
+                    temp_name = temp_fname.split('/')[-1]
+                    sim_temp = d+temp_name
+                    cell_sim = self.compute_cells_from_splits(sim_splits, sim_temp)
+                else:
+                    cell_sim = self.compute_cells_from_splits(sim_splits)
+                #   Save output
+                fname = prefix_out + "_sim%d.fits" % isim
+                self.save_cell_to_file(cell_sim,
+                                       self.tracers,
+                                       fname, with_windows=False)
 
 
 if __name__ == '__main__':

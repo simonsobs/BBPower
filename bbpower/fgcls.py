@@ -72,3 +72,18 @@ class ClPowerLaw(ClAnalytic):
 
         self._set_default_of_free_symbols(alpha=self._REF_ALPHA,
                                           amp=self._REF_AMP)
+
+class ClPowerLawCurved(ClAnalytic):
+    _REF_ALPHA = -0.5
+    _REF_AMP = 1.
+    _REF_CURV = 0.
+
+    def __init__(self, ell0, amp=None, alpha=None, curv=None):
+        analytic_expr = 'amp * (ell / ell0)**(alpha + curv * log(ell/ell0))'
+
+        kwargs = {'ell0': ell0, 'alpha': alpha, 'curv': curv}
+
+        super(ClPowerLawCurved, self).__init__(analytic_expr, **kwargs)
+
+        self._set_default_of_free_symbols(alpha=self._REF_ALPHA,
+                                          amp=self._REF_AMP, curv=self._REF_CURV)
