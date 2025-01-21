@@ -15,7 +15,7 @@ class BBPowerSummarizer(PipelineStage):
                       'data_covar_type': 'block_diagonal',
                       'data_covar_diag_order': 3}
 
-    def get_covariance_from_samples(self, v, s, covar_type='dense',
+    def get_covariance_from_samples(self, v, s, covar_type='analytic', #'dense',
                                     off_diagonal_cut=0):
         """
         Computes a covariance matrix from a set of samples in the form
@@ -23,6 +23,24 @@ class BBPowerSummarizer(PipelineStage):
         """
         if covar_type == 'diagonal':
             cov = np.diag(np.std(v, axis=0)**2)
+        if covar_type == 'analytic':
+            ncross = (self.nmaps*(self.nmaps+1))//2
+            cov = np.zeros([ncross, self.n_bpws, ncross, self.n_bpws])
+            indices_tr = np.triu_indices(self.nmaps)
+            dell = 10
+            lmax = 2+self.n_bpws*dell
+            lbands = np.linspace(2, lmax, self.n_bpws+1, dtype=int)
+            leff = 0.5*(lbands[1:]+lbands[:-1])
+            fsky = 0.1
+
+            factor_modecount = 1./((2*leff+1)*dell*fsky)
+            for ii, (i1, i2) in enumerate(zip(indices_tr[0], indices_tr[1])):
+                for jj, (j1, j2) in enumerate(zip(indices_tr[0], indices_tr[1])):
+                    covar = (v[i1, j1, :]*v[i2, j2, :]+
+                            v[i1, j2, :]*v[i2, j1, :]) * factor_modecount
+                    cov[ii, :, jj, :] = np.diag(covar)
+            
+            cov = cov.reshape([ncross * self.n_bpws, ncross * self.n_bpws])
         else:
             nsim, nd = v.shape
             vmean = np.mean(v, axis=0)
