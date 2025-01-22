@@ -24,22 +24,25 @@ class BBPowerSummarizer(PipelineStage):
         if covar_type == 'diagonal':
             cov = np.diag(np.std(v, axis=0)**2)
         if covar_type == 'analytic':
-            ncross = (self.nmaps*(self.nmaps+1))//2
+            npol = 2 
+            nfreqs = 6
+            nmaps = npol*nfreqs
+            ncross = (nmaps*(nmaps+1))//2
             cov = np.zeros([ncross, self.n_bpws, ncross, self.n_bpws])
-            indices_tr = np.triu_indices(self.nmaps)
+            indices_tr = np.triu_indices(nmaps)
             dell = 10
             lmax = 2+self.n_bpws*dell
             lbands = np.linspace(2, lmax, self.n_bpws+1, dtype=int)
             leff = 0.5*(lbands[1:]+lbands[:-1])
             fsky = 0.1
-
-            factor_modecount = 1./((2*leff+1)*dell*fsky)
+            v = np.mean(v, axis=0)  # Mean over simulations
+            v = v.reshape([self.n_bpws, ncross])
+            cov = np.zeros([ncross, ncross, self.n_bpws, self.n_bpws])
+            factor_modecount = 1. / ((2 * leff + 1) * dell * fsky)
             for ii, (i1, i2) in enumerate(zip(indices_tr[0], indices_tr[1])):
                 for jj, (j1, j2) in enumerate(zip(indices_tr[0], indices_tr[1])):
-                    covar = (v[i1, j1, :]*v[i2, j2, :]+
-                            v[i1, j2, :]*v[i2, j1, :]) * factor_modecount
-                    cov[ii, :, jj, :] = np.diag(covar)
-            
+                    covar = (v[:, i1] * v[:, j1] + v[:, i2] * v[:, j2]) * factor_modecount
+                    cov[ii, jj] = np.diag(covar)
             cov = cov.reshape([ncross * self.n_bpws, ncross * self.n_bpws])
         else:
             nsim, nd = v.shape
@@ -413,31 +416,31 @@ class BBPowerSummarizer(PipelineStage):
         dctyp = self.config['data_covar_type']
         dcord = self.config['data_covar_diag_order']
         self.get_covariance_from_samples(sim_cd_t, summ['saccs'][0],
-                                         covar_type=dctyp,
+                                         covar_type="analytic", #dctyp,
                                          off_diagonal_cut=dcord)
-        self.get_covariance_from_samples(sim_cd_x, summ['saccs'][1],
-                                         covar_type=dctyp,
-                                         off_diagonal_cut=dcord)
-        self.get_covariance_from_samples(sim_cd_n, summ['saccs'][2],
-                                         covar_type=dctyp,
-                                         off_diagonal_cut=dcord)
-        # There are so many nulls that we'll probably run out of memory
-        nctyp = self.config['nulls_covar_type']
-        ncord = self.config['nulls_covar_diag_order']
-        self.get_covariance_from_samples(sim_null, summ['saccs'][3],
-                                         covar_type=nctyp,
-                                         off_diagonal_cut=ncord)
+        #self.get_covariance_from_samples(sim_cd_x, summ['saccs'][1],
+        #                                 covar_type=dctyp,
+        #                                 off_diagonal_cut=dcord)
+        #self.get_covariance_from_samples(sim_cd_n, summ['saccs'][2],
+        #                                 covar_type=dctyp,
+        #                                 off_diagonal_cut=dcord)
+        ## There are so many nulls that we'll probably run out of memory
+        #nctyp = self.config['nulls_covar_type']
+        #ncord = self.config['nulls_covar_diag_order']
+        #self.get_covariance_from_samples(sim_null, summ['saccs'][3],
+        #                                 covar_type=nctyp,
+        #                                 off_diagonal_cut=ncord)
 
         # Save data
         print("Writing output")
         summ['saccs'][0].save_fits(self.get_output("cells_coadded_total"),
                                    overwrite=True)
-        summ['saccs'][1].save_fits(self.get_output("cells_coadded"),
-                                   overwrite=True)
-        summ['saccs'][2].save_fits(self.get_output("cells_noise"),
-                                   overwrite=True)
-        summ['saccs'][3].save_fits(self.get_output("cells_null"),
-                                   overwrite=True)
+        #summ['saccs'][1].save_fits(self.get_output("cells_coadded"),
+        #                           overwrite=True)
+        #summ['saccs'][2].save_fits(self.get_output("cells_noise"),
+        #                           overwrite=True)
+        #summ['saccs'][3].save_fits(self.get_output("cells_null"),
+        #                           overwrite=True)
 
 
 if __name__ == '__main_':
