@@ -1,0 +1,8 @@
+numpy
+scipy
+healpy
+pymaster
+sacc
+camb
+fgbuster
+emcee
