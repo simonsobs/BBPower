@@ -2,15 +2,27 @@ import numpy as np
 import os
 import argparse
 import yaml
-from scipy.linalg import sqrtm
+import os
+import time
+import sacc
 
-import sys
-sys.path.insert(0, "/global/homes/k/kwolz/bbdev/BBPower")
+import bbpower.mpi_utils as mpi
 from bbpower.fg_model import FGModel
 from bbpower.param_manager import ParameterManager
 from bbpower.bandpasses import (Bandpass, rotate_cells, rotate_cells_mat,
                                 decorrelated_bpass)
-import sacc
+from scipy.linalg import sqrtm
+
+
+def _yaml_loader(config):
+    """
+    Custom yaml loader to load the configuration file.
+    """
+    def path_constructor(loader, node):
+        return "/".join(loader.construct_sequence(node))
+    yaml.SafeLoader.add_constructor("!path", path_constructor)
+    with open(config, "r") as f:
+        return yaml.load(f, Loader=yaml.SafeLoader)
 
 
 class BBCompSep(object):
@@ -30,16 +42,10 @@ class BBCompSep(object):
         """
 
         # Load the configuration file
-        with open(args.config) as conf:
-            config = yaml.safe_load(conf)
+        config = _yaml_loader(args.config)
         self.config = config["global"] | config["BBCompSep"]
-
-        # Set the high-level parameters as attributes
-        for arg in vars(args):
-            if arg != "config":
-                setattr(self, arg, getattr(args, arg))
-            else:
-                setattr(self, "config_fname", getattr(args, arg))
+        setattr(self, "config_fname", getattr(args, "config"))
+        setattr(self, "data", self.config["data"])
 
     def setup_compsep(self):
         """
@@ -125,12 +131,13 @@ class BBCompSep(object):
         self.use_handl = self.config['likelihood_type'] == 'h&l'
 
         # Read data
-        self.s = sacc.Sacc.load_fits(self.cells_coadded)
-        self.s_cov = sacc.Sacc.load_fits(self.cells_coadded_cov)
+        cells_coadded = self.data["cells_coadded"].format(sim_id=self.sim_id)
+        self.s = sacc.Sacc.load_fits(cells_coadded)
+        self.s_cov = sacc.Sacc.load_fits(self.data["cells_coadded_cov"])
         tr_comb = self.s.get_tracer_combinations()
         if self.use_handl:
-            s_fid = sacc.Sacc.load_fits(self.cells_fiducial)
-            s_noi = sacc.Sacc.load_fits(self.cells_noise)
+            s_fid = sacc.Sacc.load_fits(self.data["cells_fiducial"])
+            s_noi = sacc.Sacc.load_fits(self.data["cells_noise"])
 
         # Keep only desired correlations
         self.pols = self.config['pol_channels']
@@ -685,7 +692,7 @@ class BBCompSep(object):
                                             self.lnprob,
                                             backend=backend)
             if nsteps_use > 0:
-                sampler.run_mcmc(pos, nsteps_use, store=True, progress=False)
+                sampler.run_mcmc(pos, nsteps_use, store=True, progress=True)
                 end = time.time()
 
         return sampler, end-start
@@ -748,8 +755,7 @@ class BBCompSep(object):
             c2 = -2*self.lnprob(par)
             return c2
 
-        res = minimize(chi2, self.params.p0,
-                       method="Powell")
+        res = minimize(chi2, self.params.p0, method="Powell")
         return res.x
 
     def fisher(self):
@@ -763,8 +769,7 @@ class BBCompSep(object):
             c2 = -2*self.lnprob(par)
             return c2
 
-        res = minimize(chi2, self.params.p0,
-                       method="Powell")
+        res = minimize(chi2, self.params.p0, method="Powell")
 
         def lnprobd(p):
             ll = self.lnprob(p)
@@ -843,8 +848,14 @@ class BBCompSep(object):
         """
         Run the BB component separation stage.
         """
+        # Make output directory
+        self.output_dir = self.config["output_dir"].format(sim_id=self.sim_id)
+        os.makedirs(self.output_dir, exist_ok=True)
+
+        # Make duplicate of config file
         from shutil import copyfile
-        copyfile(self.config_fname, self.config_copy)
+        copyfile(self.config_fname,
+                 self.config["config_copy"].format(sim_id=self.sim_id))
         self.setup_compsep()
 
         if self.config.get('sampler') == 'emcee':
@@ -914,52 +925,52 @@ class BBCompSep(object):
 
 def main(args):
     """
-    Execute the BBCompSep stage with arguments args with properties:
-    * cells_coadded: string. Path to sacc file with cross-split power spectra
-    * cells_noise: string, optional. Path to sacc file with noise power
-                   spectra.
-    * cells_fiducial: string, optional. Path to sacc file with fiducial power
-                      spectra.
-    * cells_coadded_cov: string. Path to sacc file with cross-split power
-                                 spectrum covariance.
-    * output_dir: string. Path to directory where output is stored.
-    * config: string. Path to configuration file with input parameters.
-    * config_copy: string. Path to yaml file with a copy of original parameter
-                           file.
+    Execute the BBCompSep stage with arguments args:
+        * config: string.
+          Path to configuration file with input parameters.
     """
-    compsep = BBCompSep(args)
-    compsep.run()
+    config = _yaml_loader(args.config)
+    
+    # Creating the simulation indices range to loop over
+    sim_ids = config["global"]["sim_ids"]
+    if isinstance(sim_ids, list):
+        sim_ids = np.array(sim_ids, dtype=int)
+    elif isinstance(sim_ids, str):
+        if "," in sim_ids:
+            id_min, id_max = sim_ids.split(",")
+            sim_ids = np.arange(int(id_min), int(id_max)+1)
+        else:
+            sim_ids = np.array([int(sim_ids)])
+    else:
+        sim_ids = [None]
+    
+    # MPI related initialization
+    rank, size, comm = mpi.init(True)
+
+    # Initialize tasks for MPI sharing
+    mpi_shared_list = sim_ids
+
+    # Every rank must have the same shared list
+    mpi_shared_list = comm.bcast(mpi_shared_list, root=0)
+    task_ids = mpi.distribute_tasks(size, rank, len(mpi_shared_list),
+                                    logger=None)
+    local_mpi_list = [mpi_shared_list[i] for i in task_ids]
+
+    for sim_id in local_mpi_list:
+        start = time.time()
+        compsep = BBCompSep(args)
+        setattr(compsep, "sim_id", sim_id)
+        compsep.run()
+    mpi.print_rnk0(f"Processed {len(sim_ids)} simulations "
+                   f"in {time.time() - start:.1f} seconds.", rank)
+    comm.Barrier()
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="SO SAT BB likelihood")
     parser.add_argument(
-        "--cells_coadded", type=str,
-        help="Path to sacc file with cross-split power spectra"
-    )
-    parser.add_argument(
-        "--cells_noise", type=str,
-        help="Path to sacc file with noise power spectra"
-    )
-    parser.add_argument(
-        "--cells_fiducial", type=str,
-        help="Path to sacc file with fiducial power spectra"
-    )
-    parser.add_argument(
-        "--cells_coadded_cov", type=str,
-        help="Path to sacc file with cross-split power spectrum covariance"
-    )
-    parser.add_argument(
-        "--output_dir", type=str,
-        help="Path to output directory"
-    )
-    parser.add_argument(
         "--config", type=str,
         help="Path to yaml file with pipeline configuration"
-    )
-    parser.add_argument(
-        "--config_copy", type=str,
-        help="Path to yaml file with copy of config file"
     )
 
     args = parser.parse_args()
