@@ -6,3 +6,5 @@ sacc
 camb
 fgbuster
 emcee
+getdist
+bbpipe
