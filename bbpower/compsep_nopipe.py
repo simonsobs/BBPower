@@ -2,16 +2,14 @@ import numpy as np
 import os
 import argparse
 import yaml
-import os
 import time
-import sacc
+import sacc  # noqa
 
 import bbpower.mpi_utils as mpi
 from bbpower.fg_model import FGModel
 from bbpower.param_manager import ParameterManager
 from bbpower.bandpasses import (Bandpass, rotate_cells, rotate_cells_mat,
                                 decorrelated_bpass)
-from scipy.linalg import sqrtm
 
 
 def _yaml_loader(config):
@@ -109,10 +107,11 @@ class BBCompSep(object):
 
     def _freq_pol_iterator(self):
         icl = -1
-        for b1 in range(self.nfreqs):
+        map_sets = list(self.config["map_sets"])
+        for b1 in range(len(map_sets)):
             for p1 in range(self.npol):
                 m1 = p1 + self.npol * b1
-                for b2 in range(b1, self.nfreqs):
+                for b2 in range(b1, len(map_sets)):
                     if b1 == b2:
                         p2_r = range(p1, self.npol)
                     else:
@@ -120,7 +119,7 @@ class BBCompSep(object):
                     for p2 in p2_r:
                         m2 = p2 + self.npol * b2
                         icl += 1
-                        yield b1, b2, p1, p2, m1, m2, icl
+                        yield map_sets[b1], map_sets[b2], p1, p2, m1, m2, icl
 
     def parse_sacc_file(self):
         """
@@ -139,13 +138,19 @@ class BBCompSep(object):
             s_fid = sacc.Sacc.load_fits(self.data["cells_fiducial"])
             s_noi = sacc.Sacc.load_fits(self.data["cells_noise"])
 
+        # Keep only desired tracers
+        tr_names = list(self.config['map_sets'].keys())
+
         # Keep only desired correlations
         self.pols = self.config['pol_channels']
-        corr_all = ['cl_ee', 'cl_eb', 'cl_be', 'cl_bb']
+        corr_all = ['cl_00', 'cl_0e', 'cl_0b', 'cl_e0', 'cl_b0',
+                    'cl_ee', 'cl_eb', 'cl_be', 'cl_bb']
         corr_keep = []
         for m1 in self.pols:
             for m2 in self.pols:
                 clname = 'cl_' + m1.lower() + m2.lower()
+                if "0" in clname:
+                    continue
                 corr_keep.append(clname)
         for c in corr_all:
             if c not in corr_keep:
@@ -235,12 +240,10 @@ class BBCompSep(object):
         # Parse into the right ordering
         itr1 = self._freq_pol_iterator()
         for b1, b2, p1, p2, m1, m2, ind_vec in itr1:
-            t1 = tr_names[b1]
-            t2 = tr_names[b2]
             pol1 = self.pols[p1].lower()
             pol2 = self.pols[p2].lower()
             cl_typ = f'cl_{pol1}{pol2}'
-            ind_a = self.s.indices(cl_typ, (t1, t2))
+            ind_a = self.s.indices(cl_typ, (b1, b2))
             if len(ind_a) != self.n_bpws:
                 raise ValueError("All power spectra need to be "
                                  "sampled at the same ells")
@@ -248,16 +251,14 @@ class BBCompSep(object):
             self.windows[ind_vec, :, :] = w.weight[mask_w, :].T
             v2d[:, ind_vec] = np.array(self.s.mean[ind_a])
             if self.use_handl:
-                _, v2d_noi[:, ind_vec] = s_noi.get_ell_cl(cl_typ, t1, t2)
-                _, v2d_fid[:, ind_vec] = s_fid.get_ell_cl(cl_typ, t1, t2)
+                _, v2d_noi[:, ind_vec] = s_noi.get_ell_cl(cl_typ, b1, b2)
+                _, v2d_fid[:, ind_vec] = s_fid.get_ell_cl(cl_typ, b1, b2)
             itr2 = self._freq_pol_iterator()
-            for b1b, b2b, p1b, p2b, m1b, m2b, ind_vecb in itr2:
-                t1b = tr_names[b1b]
-                t2b = tr_names[b2b]
+            for b1b, b2b, p1b, p2b, _, _, ind_vecb in itr2:
                 pol1b = self.pols[p1b].lower()
                 pol2b = self.pols[p2b].lower()
                 cl_typb = f'cl_{pol1b}{pol2b}'
-                ind_b = self.s.indices(cl_typb, (t1b, t2b))
+                ind_b = self.s.indices(cl_typb, (b1b, b2b))
                 cv2d[:, ind_vec, :, ind_vecb] = self.s_cov.covariance.covmat[ind_a][:, ind_b]  # noqa
 
         # Store data
@@ -269,6 +270,8 @@ class BBCompSep(object):
                                      self.n_bpws * self.ncross])
         self.invcov = np.linalg.solve(self.bbcovar,
                                       np.identity(len(self.bbcovar)))
+        np.savez(self.output_dir + '/data_ell_cl_invcov.npz',
+                 ell=self.ell_b, cl=self.bbdata, invcov=self.invcov)
         return
 
     def load_cmb(self):
@@ -583,6 +586,7 @@ class BBCompSep(object):
         """
         Prepare the HL likelihood.
         """
+        from scipy.linalg import sqrtm  # noqa
         fiducial_noise = self.bbfiducial + self.bbnoise
         self.Cfl_sqrt = np.array([sqrtm(f) for f in fiducial_noise])
         self.observed_cls = self.bbdata + self.bbnoise
@@ -659,7 +663,7 @@ class BBCompSep(object):
         """
         Sample the model with MCMC.
         """
-        import emcee
+        import emcee  # noqa
         from multiprocessing import Pool
 
         fname_temp = self.output_dir + '/emcee.npz.h5'
@@ -698,9 +702,9 @@ class BBCompSep(object):
         return sampler, end-start
 
     def polychord_sampler(self):
-        import pypolychord
-        from pypolychord.settings import PolyChordSettings
-        from pypolychord.priors import UniformPrior, GaussianPrior
+        import pypolychord  # noqa
+        from pypolychord.settings import PolyChordSettings  # noqa
+        from pypolychord.priors import UniformPrior, GaussianPrior  # noqa
 
         ndim = len(self.params.p0)
         nder = 0
@@ -749,7 +753,7 @@ class BBCompSep(object):
         """
         Find maximum likelihood
         """
-        from scipy.optimize import minimize
+        from scipy.optimize import minimize  # noqa
 
         def chi2(par):
             c2 = -2*self.lnprob(par)
@@ -762,8 +766,8 @@ class BBCompSep(object):
         """
         Evaluate Fisher matrix
         """
-        import numdifftools as nd
-        from scipy.optimize import minimize
+        import numdifftools as nd  # noqa
+        from scipy.optimize import minimize  # noqa
 
         def chi2(par):
             c2 = -2*self.lnprob(par)
@@ -930,7 +934,7 @@ def main(args):
           Path to configuration file with input parameters.
     """
     config = _yaml_loader(args.config)
-    
+
     # Creating the simulation indices range to loop over
     sim_ids = config["global"]["sim_ids"]
     if isinstance(sim_ids, list):
@@ -943,7 +947,7 @@ def main(args):
             sim_ids = np.array([int(sim_ids)])
     else:
         sim_ids = [None]
-    
+
     # MPI related initialization
     rank, size, comm = mpi.init(True)
 
