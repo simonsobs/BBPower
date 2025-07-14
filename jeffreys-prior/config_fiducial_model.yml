@@ -1,6 +1,10 @@
+# DEV TODO: BBPlotter still runs on BBPipe, meaning all the "!path" snippets in
+# this config cannot be read and need to be replaced by absolute paths until
+# a new plotter (without bbpipe depedency) is implemented!
+
 # These parameters are accessible to all stages
-chains_dir: &chains_dir "/pscratch/sd/k/kwolz/jeffreys/chains/all_channels/gaussian_fgs/fiducial_model/{sim_id:04}"  ## YOUR OUTPUT DIRECTORY
-data_dir: &data_dir "/global/homes/k/kwolz/bbdev/BBPower/jeffreys-prior/data"  ## YOUR DATA DIRECTORY   
+chains_dir: &chains_dir "/scratch/gpfs/SIMONSOBS/users/kw6905/jeffreys/chains/all_channels/gaussian_fgs/fiducial_model/{sim_id:04}"  ## YOUR OUTPUT DIRECTORY
+data_dir: &data_dir "/home/kw6905/bbdev/BBPower/jeffreys-prior/data"  ## YOUR DATA DIRECTORY   
 covar_sacc: &covar_sacc !path [*data_dir, cells_coadded_cov_r0_Alens1_baseline_optimistic.fits]
 
 global:
@@ -21,13 +25,28 @@ global:
         cells_fiducial: null
         # Path to sacc file with cross-split power spectrum covariance
         cells_coadded_cov: *covar_sacc
+    
+    # These are the different frequency channels. Keywords must coincide with
+    # the tracer names inside the sacc files.
+    map_sets:
+        band1:  # 27 GHz
+            beam_file: null
+        band2:  # 39 GHz
+            beam_file: null
+        band3:  # 93 GHz
+            beam_file: null
+        band4:  # 145 GHz
+            beam_file: null
+        band5:  # 225 GHz
+            beam_file: null
+        band6:  # 280 GHz
+            beam_file: null
 
 BBCompSep:
     output_dir: *chains_dir
-    # Sampler type (choose 'emcee', 'polychord', 'maximum_likelihood', 
-    # 'single_point' or 'timing')
-    #sampler: "fisher"
-    sampler: maximum_likelihood
+    # Sampler type (choose 'emcee', 'polychord', 'fisher', 'single_point' or 
+    # 'timing')
+    sampler: emcee
     predict_linearized: False
     # If you chose polychord:
     nlive: 50
