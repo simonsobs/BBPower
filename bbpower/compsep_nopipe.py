@@ -183,10 +183,6 @@ class BBCompSep(object):
                 assert np.all(ind1 == ind3), "Fiducial sacc ordering is wrong"
                 assert np.all(ind1 == ind4), "Noise sacc ordering is wrong"
 
-        if self.config['bands'] == 'all':
-            tr_names = sorted(list(self.s.tracers.keys()))
-        else:
-            tr_names = self.config['bands']
         self.nfreqs = len(tr_names)
         self.npol = len(self.pols)
         self.nmaps = self.nfreqs * self.npol
@@ -221,10 +217,9 @@ class BBCompSep(object):
         self.windows = np.zeros([self.ncross, self.n_bpws, self.n_ell])
 
         # Get power spectra and covariances
-        if self.config['bands'] == 'all':
-            if not (self.s_cov.covariance.covmat.shape[-1] == len(self.s.mean)
-                    == self.n_bpws * self.ncross):
-                raise ValueError("C_ell vector's size is wrong")
+        if not (self.s_cov.covariance.covmat.shape[-1] == len(self.s.mean)
+                == self.n_bpws * self.ncross):
+            raise ValueError("C_ell vector's size is wrong")
 
         v2d = np.zeros([self.n_bpws, self.ncross])
         if self.use_handl:
@@ -816,10 +811,8 @@ class BBCompSep(object):
             p = self.params.p0
         pars = self.params.build_params(p)
         model_cls = self.model(pars)
-        if self.config['bands'] == 'all':
-            tr_names = sorted(list(self.s.tracers.keys()))
-        else:
-            tr_names = self.config['bands']
+        tr_names = list(self.config['map_sets'].keys())
+
         if save_npz:
             np.savez(self.output_dir+'/cells_model.npz',
                      tracers=tr_names,
@@ -827,7 +820,7 @@ class BBCompSep(object):
                      dls=model_cls)
             return
         s = sacc.Sacc()
-        for it, tn in enumerate(tr_names):
+        for tn in tr_names:
             t = self.s.tracers[tn]
             s.add_tracer('NuMap', tn, quantity='cmb_polarization',
                          spin=2, nu=t.nu, bandpass=t.bandpass,
