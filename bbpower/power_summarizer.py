@@ -1,5 +1,5 @@
 from bbpipe import PipelineStage
-from .types import TextFile, FitsFile
+from .data_types import TextFile, FitsFile
 import sacc
 import numpy as np
 

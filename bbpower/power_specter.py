@@ -1,5 +1,5 @@
 from bbpipe import PipelineStage
-from .types import FitsFile, TextFile, DummyFile
+from .data_types import FitsFile, TextFile, DummyFile
 import sacc
 import numpy as np
 import healpy as hp
