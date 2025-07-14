@@ -126,6 +126,8 @@ class BBCompSep(object):
         Reads the data in the sacc file included the power spectra,
         bandpasses, and window functions.
         """
+        from copy import deepcopy
+
         # Decide if you're using H&L
         self.use_handl = self.config['likelihood_type'] == 'h&l'
 
@@ -133,13 +135,18 @@ class BBCompSep(object):
         cells_coadded = self.data["cells_coadded"].format(sim_id=self.sim_id)
         self.s = sacc.Sacc.load_fits(cells_coadded)
         self.s_cov = sacc.Sacc.load_fits(self.data["cells_coadded_cov"])
-        tr_comb = self.s.get_tracer_combinations()
         if self.use_handl:
             s_fid = sacc.Sacc.load_fits(self.data["cells_fiducial"])
             s_noi = sacc.Sacc.load_fits(self.data["cells_noise"])
 
         # Keep only desired tracers
         tr_names = list(self.config['map_sets'].keys())
+        tr_names_before = deepcopy(self.s.tracers)
+        for tr in tr_names_before:
+            if tr not in tr_names:
+                self.s.remove_tracers([tr])
+                self.s_cov.remove_tracers([tr])
+        tr_comb = self.s.get_tracer_combinations()
 
         # Keep only desired correlations
         self.pols = self.config['pol_channels']
@@ -828,13 +835,11 @@ class BBCompSep(object):
                          map_unit='uK_CMB')
         for b1, b2, p1, p2, m1, m2, ind in self._freq_pol_iterator():
             cl = model_cls[:, m1, m2]
-            t1 = tr_names[b1]
-            t2 = tr_names[b2]
             pol1 = self.pols[p1].lower()
             pol2 = self.pols[p2].lower()
             cltyp = f'cl_{pol1}{pol2}'
             win = sacc.BandpowerWindow(self.bpw_l, self.windows[ind].T)
-            s.add_ell_cl(cltyp, t1, t2, self.ell_b, cl, window=win)
+            s.add_ell_cl(cltyp, b1, b2, self.ell_b, cl, window=win)
 
         s.add_covariance(self.bbcovar)
         s.save_fits(self.output_dir+'/cells_model.fits',
@@ -854,6 +859,30 @@ class BBCompSep(object):
         copyfile(self.config_fname,
                  self.config["config_copy"].format(sim_id=self.sim_id))
         self.setup_compsep()
+
+        # Get the chi2 and best-fit estimates
+        from scipy.stats import chi2 as scipy_chi2
+        sampler = self.minimizer()
+        chi2 = -2*self.lnprob(sampler)
+        ndof = len(self.bbcovar)
+        kwargs = {
+            "params": sampler,
+            "names": self.params.p_free_names,
+            "chi2": chi2,
+            "ndof": len(self.bbcovar),
+            "pte": scipy_chi2.sf(chi2, ndof, loc=0, scale=1)
+        }
+        np.savez(self.output_dir+'/chi2.npz', **kwargs)
+        with open(self.output_dir+'/chi2.txt', 'w') as f:
+            for key, value in kwargs.items():
+                f.write('%s: %s\n' % (key, value))
+        print("Saved best-fit parameters")
+
+        # Get best-fit power spectra
+        at_min = self.config.get('predict_at_minimum', True)
+        save_npz = not self.config.get('predict_to_sacc', False)
+        sampler = self.predicted_spectra(at_min=at_min, save_npz=save_npz)
+        print("Predicted spectra saved")
 
         if self.config.get('sampler') == 'emcee':
             sampler, timing = self.emcee_sampler()
@@ -877,22 +906,6 @@ class BBCompSep(object):
                      params=p0, fisher=fisher,
                      names=self.params.p_free_names)
 
-        elif self.config.get('sampler') == 'maximum_likelihood':
-            sampler = self.minimizer()
-            chi2 = -2*self.lnprob(sampler)
-            kwargs = {"params": sampler,
-                      "names": self.params.p_free_names,
-                      "chi2": chi2,
-                      "ndof": len(self.bbcovar)}
-            np.savez(self.output_dir+'/chi2.npz', **kwargs)
-            with open(self.output_dir+'/chi2.txt', 'w') as f:
-                for key, value in kwargs.items():
-                    f.write('%s: %s\n' % (key, value))
-            print("Best fit:")
-            for n, p in zip(self.params.p_free_names, sampler):
-                print(n+" = %.3lE" % p)
-            print("Chi2: %.3lE" % chi2)
-
         elif self.config.get('sampler') == 'single_point':
             sampler = self.singlepoint()
             np.savez(self.output_dir+'/single_point.npz',
@@ -907,13 +920,6 @@ class BBCompSep(object):
                      names=self.params.p_free_names)
             print("Total time:", sampler[0])
             print("Time per eval:", sampler[1])
-
-        elif self.config.get('sampler') == 'predicted_spectra':
-            at_min = self.config.get('predict_at_minimum', True)
-            save_npz = not self.config.get('predict_to_sacc', False)
-            sampler = self.predicted_spectra(at_min=at_min, save_npz=save_npz)
-            print("Predicted spectra saved")
-
         else:
             raise ValueError("Unknown sampler")
 

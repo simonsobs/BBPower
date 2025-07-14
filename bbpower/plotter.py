@@ -125,6 +125,7 @@ class BBPlotter(PipelineStage):
             self.s_cd_t is not None,
             self.s_cd_n is not None
         )
+        print("do_best", do_best)
         if do_best:
             best_fit_label = "\n".join(
                 [fr"{ll}: {b}"for ll, b in self.best_fit.items()]
@@ -431,11 +432,11 @@ class BBPlotter(PipelineStage):
                 labels_dict[n]: f"{float(p):.3f}"
                 for n, p in zip(chisq["names"], chisq['params'])
             }
-            self.best_fit["chisq"] = str(int(chisq['chisq']))
+            self.best_fit["chi2"] = str(int(chisq['chi2']))
             self.best_fit["ndof"] = str(int(chisq['ndof']))
             self.best_fit["pte"] = f"{chisq['pte']:.1e}"
 
-            self.chisq = chisq["chisq"]
+            self.chisq = chisq["chi2"]
             self.ndof = chisq["ndof"]
             self.pte = chisq["pte"]
 
