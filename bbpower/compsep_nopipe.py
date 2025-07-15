@@ -381,6 +381,7 @@ class BBCompSep(object):
         """
         Defines the total model and integrates over
         the bandpasses and windows.
+        Parameters are 
         """
         # [npol,npol,nell]
         cmb_cell = (params['r_tensor'] * self.cmb_tens +
@@ -388,6 +389,8 @@ class BBCompSep(object):
                     self.cmb_scal) * self.dl2cl
         # [nell,npol,npol]
         cmb_cell = np.transpose(cmb_cell, axes=[2, 0, 1])
+
+        # Kevin: this can be ignored for the standard case
         if self.config['cmb_model'].get('use_birefringence'):
             bi_angle = np.radians(params['birefringence'])
             c = np.cos(2*bi_angle)
@@ -396,8 +399,12 @@ class BBCompSep(object):
                              [-s, c]])
             cmb_cell = rotate_cells_mat(bmat, bmat, cmb_cell)
 
+        # Kevin: This is evaluating the foreground SEDs at the SO channels'
+        # frequencies
         # [ncomp, ncomp, nfreq, nfreq], [ncomp, nfreq,[matrix]]
         fg_scaling, rot_m = self.integrate_seds(params)
+
+        # Kevin: This is the power law model for foreground power spectra
         # [ncomp,npol,npol,nell]
         fg_cell = self.evaluate_power_spectra(params)
 
@@ -493,6 +500,12 @@ class BBCompSep(object):
                                       fg_scaling_d2[f2, c1] *
                                       (fg_scaling[c1, c1, f1, f1])**0.5) * cls_02[c1]  # noqa
                     cls_array_fg[f1, f2] += cls
+
+        # === Theory model computation ends here (except polarization angle
+        #     rotation) ===
+        # * Coadded CMB + dust + synchrotron D_ells: cls_array_fg
+        #   (sorry for misleading name!)
+        #   shape: [nfreqs, nfreqs, n_ell, npol, npol] 
 
         # Window convolution
         cls_array_list = np.zeros([self.n_bpws, self.nfreqs,
