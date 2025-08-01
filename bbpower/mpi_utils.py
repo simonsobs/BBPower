@@ -33,7 +33,7 @@ def init(switch=False):
         print("WARNING: MPI is turned off by default. "
               "Use mpi.init(switch=True) to initialize MPI")
         print("MPI is turned off")
-        return exit_code
+        return 0, 1, None
     else:
         _switch = True
 
