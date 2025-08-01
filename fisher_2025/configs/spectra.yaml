@@ -1,0 +1,88 @@
+base_dir: &base_dir /global/cfs/cdirs/sobs/sims/fisher_2025
+aux_dir: &aux_dir /global/cfs/cdirs/sobs/sims/so_extended/bbpower_input/input_auxiliaries
+chains_dir: &chains_dir !path [*base_dir, "mcmc_chains/gaussian/Alens0.3/fsky14/{sim_id:04d}/fiducial_model"]
+covar_sacc: &covar_sacc !path [*base_dir, "cells_sims/gaussian/Alens0.3/fsky14/0000/cells_coadded.fits"]
+
+global:
+    nside: 512
+    compute_dell: True
+
+    # Simulations
+    sim_ids: 0,499  # Accepts formats [id] and [id_start],[id_stop]
+
+    # Path where copy of config file will be stored
+    config_copy: !path [*base_dir, /coadded_sims/gaussian/Alens0.3/fsky14/config_copy.yaml]
+    
+    # Bundles for each map set
+    bundle_ids: [1, 2, 3, 4]
+
+    # These are the different frequency channels. Keywords must coincide with
+    # the tracer names inside the sacc files.
+    map_sets:
+        band1:  # 27 GHz
+            beam_file: !path [*aux_dir, beams/beam_LF1.txt]
+            bandpass_file: !path [*aux_dir, bandpasses/bpss_1.txt]
+        band2:  # 39 GHz
+            beam_file: !path [*aux_dir, beams/beam_LF2.txt]
+            bandpass_file: !path [*aux_dir, bandpasses/bpss_2.txt]
+        band3:  # 93 GHz
+            beam_file: !path [*aux_dir, beams/beam_MF1.txt]
+            bandpass_file: !path [*aux_dir, bandpasses/bpss_3.txt]
+        band4:  # 145 GHz
+            beam_file: !path [*aux_dir, beams/beam_MF2.txt]
+            bandpass_file: !path [*aux_dir, bandpasses/bpss_4.txt]
+        band5:  # 225 GHz
+            beam_file: !path [*aux_dir, beams/beam_UHF1.txt]
+            bandpass_file: !path [*aux_dir, bandpasses/bpss_5.txt]
+        band6:  # 280 GHz
+            beam_file: !path [*aux_dir, beams/beam_UHF2.txt]
+            bandpass_file: !path [*aux_dir, bandpasses/bpss_6.txt]
+
+    # Output spectrum file(s) for cross-bundle spectra
+    cells_dir: !path [*base_dir, cells_sims/gaussian/Alens0.3/fsky14]
+    # Accept placeholder: sim_id (optional)
+    cells_format: "{sim_id:04d}/cells_all_bundles_sim{sim_id:04d}.fits"
+
+BBPowerSpecter:
+    # Input map bundles
+    # Maps are expected to be stored in arrays of shape [n_map_sets*3, n_pix]
+    map_dir: !path [*base_dir, /coadded_sims/gaussian/Alens0.3/fsky14]
+    # Expect placeholders: bundle_id, n_bundles (mandatory), sim_id (optional)
+    map_format: "{sim_id:04d}/SO_SAT_obs_map_split_{bundle_id}of{n_bundles}.fits"
+
+    # Analysis mask
+    # Assume a single analysis mask for all channels.
+    mask_path: !path [*base_dir, bbpower_input/mask_common_fsky14.fits]
+
+    # Mode coupling matrices (including per-channel beams)
+    # Expect placeholders: band1, band2 (mandatory)
+    # (band1, band2) fill the upper triangular matrix (incl diagonal) of the
+    # index matrix [[1, ..., n_map_sets], ..., [1, ..., n_map_sets]]
+    mcm_path: !path [*base_dir, "bbpower_input/mcm_fsky14_{band1}_{band2}.fits"]
+
+    # Bandpower definition
+    bpw_edges: "/global/cfs/cdirs/sobs/sims/so_extended/bbpower_input/input_auxiliaries/bpw_edges_1536.txt"
+    purify_B: True
+    n_iter : 3
+
+BBPowerSummarizer:
+    # Output SACC file(s) for cross-mapset spectra
+    # Accept placeholder: sim_id (optional)
+    sacc_dir: !path [*base_dir, "cells_sims/gaussian/Alens0.3/fsky14/{sim_id:04d}"]
+    # Expect placeholder: typ (mandatory), sim_id (optional)
+    sacc_format: "cells_{typ}.fits"
+
+    # Compute covariance (from all sim_ids)?
+    do_covar: False
+    # Compute null spectra?
+    do_null: False
+    # Compute noise spectra?
+    do_noise: True
+    # Compute total coadded spectra?
+    do_coadded_total: True
+
+    # Covariance types
+    nulls_covar_type: "diagonal"
+    nulls_covar_diag_order: 0
+    data_covar_type: "block_diagonal"
+    data_covar_diag_order: 3
