@@ -255,6 +255,12 @@ class BBCompSep(object):
             if self.use_handl:
                 _, v2d_noi[:, ind_vec] = s_noi.get_ell_cl(cl_typ, b1, b2)
                 _, v2d_fid[:, ind_vec] = s_fid.get_ell_cl(cl_typ, b1, b2)
+            # if self.input_is_cl:
+            #     cl2dl = self.ell_b * (self.ell_b + 1) / 2 / np.pi
+            #     v2d[:, ind_vec] *= cl2dl
+            #     if self.use_handl:
+            #         v2d_noi[:, ind_vec] *= cl2dl
+            #         v2d_fid[:, ind_vec] *= cl2dl
             itr2 = self._freq_pol_iterator()
             for b1b, b2b, p1b, p2b, _, _, ind_vecb in itr2:
                 pol1b = self.pols[p1b].lower()
@@ -262,6 +268,8 @@ class BBCompSep(object):
                 cl_typb = f'cl_{pol1b}{pol2b}'
                 ind_b = self.s.indices(cl_typb, (b1b, b2b))
                 cv2d[:, ind_vec, :, ind_vecb] = self.s_cov.covariance.covmat[ind_a][:, ind_b]  # noqa
+                # if self.input_is_cl:
+                #     cv2d[:, ind_vec, :, ind_vecb] *= np.outer(cl2dl, cl2dl)
 
         # Store data
         self.bbdata = self.vector_to_matrix(v2d)
@@ -390,7 +398,6 @@ class BBCompSep(object):
         # [nell,npol,npol]
         cmb_cell = np.transpose(cmb_cell, axes=[2, 0, 1])
 
-        # Kevin: this can be ignored for the standard case
         if self.config['cmb_model'].get('use_birefringence'):
             bi_angle = np.radians(params['birefringence'])
             c = np.cos(2*bi_angle)
@@ -399,12 +406,12 @@ class BBCompSep(object):
                              [-s, c]])
             cmb_cell = rotate_cells_mat(bmat, bmat, cmb_cell)
 
-        # Kevin: This is evaluating the foreground SEDs at the SO channels'
+        # This is evaluating the foreground SEDs at the SO channels'
         # frequencies
         # [ncomp, ncomp, nfreq, nfreq], [ncomp, nfreq,[matrix]]
         fg_scaling, rot_m = self.integrate_seds(params)
 
-        # Kevin: This is the power law model for foreground power spectra
+        # This is the power law model for foreground power spectra
         # [ncomp,npol,npol,nell]
         fg_cell = self.evaluate_power_spectra(params)
 
@@ -711,7 +718,9 @@ class BBCompSep(object):
                                             self.lnprob,
                                             backend=backend)
             if nsteps_use > 0:
-                sampler.run_mcmc(pos, nsteps_use, store=True, progress=True)
+                show_progress = not self.do_mpi
+                sampler.run_mcmc(pos, nsteps_use, store=True,
+                                 progress=show_progress)
                 end = time.time()
 
         return sampler, end-start
@@ -855,8 +864,7 @@ class BBCompSep(object):
             s.add_ell_cl(cltyp, b1, b2, self.ell_b, cl, window=win)
 
         s.add_covariance(self.bbcovar)
-        s.save_fits(self.output_dir+'/cells_model.fits',
-                    overwrite=True)
+        s.save_fits(self.output_dir+'/cells_model.fits', overwrite=True)
         return
 
     def run(self):
@@ -893,7 +901,7 @@ class BBCompSep(object):
 
         # Get best-fit power spectra
         at_min = self.config.get('predict_at_minimum', True)
-        save_npz = not self.config.get('predict_to_sacc', False)
+        save_npz = not self.config.get('predict_to_sacc', True)
         sampler = self.predicted_spectra(at_min=at_min, save_npz=save_npz)
         print("Predicted spectra saved")
 
@@ -976,6 +984,7 @@ def main(args):
         start = time.time()
         compsep = BBCompSep(args)
         setattr(compsep, "sim_id", sim_id)
+        setattr(compsep, "do_mpi", size > 1)
         compsep.run()
     mpi.print_rnk0(f"Processed {len(sim_ids)} simulations "
                    f"in {time.time() - start:.1f} seconds.", rank)
