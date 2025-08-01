@@ -5,7 +5,7 @@ import os
 import argparse
 import yaml
 import time
-import sacc  # noqa
+import sacc
 
 import bbpower.mpi_utils as mpi
 
@@ -121,9 +121,6 @@ class BBPowerSpecter(object):
         bpss_fnames = [map_set["bandpass_file"]
                        for map_set in self.config["map_sets"].values()]
         self.n_bpss = len(bpss_fnames)
-        
-        # DEBUG
-        print("n_bpss", self.n_bpss)
 
         self.bpss = {}
         for i_f, f in enumerate(bpss_fnames):
