@@ -2,7 +2,33 @@ import numpy as np
 
 
 class Bandpass(object):
+    #
+    # Attributes:
+    #   number: refers to the current object's band number (e.g. band 1 has number = 1) 
+    #   nu: a list of frequencies within the sampling window; used to divide the window into 'bins' 
+    #   bnu_dnu: the product of a bin width and the telescope's bandpass in a give bin. 
+    #       useful since measured intensity within a bin can be approximated by the average emmitted intensity in the bin times bnu_dnu times nu^2
+    #   nu_mean: the mean frequency of CMB radiation observed (weighted by intensity)
+    #   cmb_norm: normalisation constant, preportional to the intensity of CMB radiation measured 
+    # Additional values from config -> systematics -> bandpasses -> bandpass{self.number} -> parameters (default is false / none if location is empty)
+    #   do_shift
+    #   name_shift
+    #   do_gain
+    #   name_gain
+    #   do_dphi1
+    #   name_dphi1
     def __init__(self, nu, dnu, bnu, bp_number, config, phi_nu=None):
+        # 
+        # Input:
+        #   nu: a list of frequencies within the sampling window at which the telescope's sensitivity is known
+        #   dnu: list of 'width' of nu around each frequency in nu
+        #       calcualated as dnu[0] = nu[1]-nu[0], dnu[-1] = nu[-1]-nu[-2], dnu[i] = 0.5*(nu[i+1]-nu[i-1]) for all other i
+        #   bnu: list of sensitivities of the telescope at each frequency in nu 
+        #   bp_number: band number, equal to 1 for the first band, 2 for the second ...
+        #   config: the configuration file
+        #   is_complex: BOOL, true if config -> systematics -> bandpasses -> bandpass_{self.number} -> phase_nu is none-empty
+        #
+        # No output
         self.number = bp_number
         self.nu = nu
         self.bnu_dnu = bnu * dnu
@@ -58,11 +84,27 @@ class Bandpass(object):
         return
 
     def sed_CMB_RJ(self, nu):
+        # Input:
+        #   nu: an array of frequencies
+        #   
+        # Output:
+        #  conv_sed: an array of SED(nu) measured in RJ temperature units
+        #   
         x = 0.01760867023799751*nu
         ex = np.exp(x)
         return ex*(x/(ex-1))**2
 
     def convolve_sed(self, sed, params):
+        #
+        # Finds the mean value of the sed observed in the current band, taking into account the finite width of the band, gain factors, phase shifts and frequency shifts defined in the config file
+        #
+        # Input:
+        #   sed: the sed of interest
+        #   params: a dictionary of {NAME: VAL} pairs for each parameter in the model. The mean sed is calculated with the parameters taking these values. 
+        #
+        # Output:
+        #   conv_sed: the mean value of sed measured in the ban
+        #   rot_mat: equal to None if do_dphi = False. Equal to a rotation matrix if not. 
         dnu = 0.
         dphi1_phase = 1.
         if self.do_shift:

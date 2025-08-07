@@ -26,6 +26,10 @@ labels_dict = {
     'amp_s_bb': '$A_s^{BB}$',
     'alpha_s_ee': '$\\alpha_s^{EE}$',
     'amp_s_ee': '$A_s^{EE}$',
+    'amp_s_beta': "$B_s$",
+    'amp_d_beta': "$B_d",
+    'gamma_d_beta': '$\\gamma_d',
+    'gamma_s_beta': '$\\gamma_s'
 }
 
 
@@ -34,6 +38,14 @@ class BBPlotter(PipelineStage):
     Plotting stage for BBPower. Plots power spectra, best-fit models, and
     posterior chains.
     """
+    #
+    # Attributes:
+    #   s_fid: fiducial values
+    #   s_best: best fit values
+    #   s_cd_x: coadded values?
+    #   s_cd_t: coadded totals?
+    #   chain: posterior chain data
+    #   
     name = "BBPlotter"
     inputs = [
         ('cells_coadded_total', FitsFile),

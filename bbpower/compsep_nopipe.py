@@ -11,7 +11,6 @@ from bbpower.param_manager import ParameterManager
 from bbpower.bandpasses import (Bandpass, rotate_cells, rotate_cells_mat,
                                 decorrelated_bpass)
 
-
 def _yaml_loader(config):
     """
     Custom yaml loader to load the configuration file.
@@ -24,11 +23,62 @@ def _yaml_loader(config):
 
 
 class BBCompSep(object):
+    # TODO: FIX the analytical derivatives wrt beta
     """
     Component separation stage
     This stage does harmonic domain foreground cleaning (e.g. BICEP).
     The foreground model parameters are defined in the config.yml file.
     """
+
+    # Attributes:
+    # 
+    #   config: DICT - contains the info from the configuration file taht is stored within "global" or "BBCompSep"
+    #   config_fname: ???
+    #   use_handl: BOOL - true if we are using handl
+    #   s: saac data of cross-split power spectra (i.e. the data we are analysing) with only the desired frequency channels
+    #   s_cov: saac data of file with power spectrum covariance with only the desired frequency channels and desired polarization correlations within the range [l_min,l_max]
+    #   s_fid: if use_handl is true, this is the saac data of the fiducial power spectra  and desired polarization correlations within the range [l_min,l_max]
+    #   s_noi: if use_handl is true, this is the saac data of the noise power spectra at the desired polarization correlations within the range [l_min,l_max]
+    #   pols: list of polarization channels to be considered
+    #   nfreq: INT - the number of frequencies that we are considering
+    #   npol: INT - the number of polerizations that we are considering
+    #   nmap: INT - nfreq * npol, the number of maps that need to be considered
+    #   index_ut: TUPLE of ndarrays. Contains the indecies of the upper triangle of a nmap by nmap matrix
+    #   ncross: the number of (frequency1, polarisation1), (frequency2, polarization2) pairs that we will be considering
+    #   pol_order: DICT of {POLARIZATION:INDEX} where index describes the order polarizations appear within the files
+    #   bpss: list of Bypasses object - contains info regarding bandpasses for each filter that we observed with
+    #   ell_b: list of ell that have been sampled
+    #   bpw_l:
+    #   n_ell: the ell values (>=2) that we have data for
+    #   n_bpws: the ell values that we are actually sampling for
+    #   dl2cl: array of conversion factors to convert from dl to cl for each ell value in npw_l
+    #   vector_indices - a nmap x nmap symetric matrix with elements in the upper triangle labelled in ascending order, first by row then column:
+    #       e.g. if nmap = 4, upper triangle is labelled:
+    #               0  1  2  3
+    #                  4  5  6
+    #                     7  8
+    #                        9
+    #       so vector_indicies is the symetric matrix with those elements in the upper triangle:
+    #              [ [  0,  1,  2,  3],
+    #                [  1,  4,  5,  6],
+    #                [  2,  5,  7,  8],
+    #                [  3,  6,  8,  9] ]
+    #   bbdata: 3dmatrix containing datapoints. First index is arranged in order of ell. Second index is arranged by frequency1 and then polarization1
+    #           (e.g. if we had two frequency bands b1 and b2 and two polarizations E and B, the columns are b1E b1B b2E b2B) and then thrid index is 
+    #           arranged by freq2 and then polarization2. 
+    #   bbnoise: only defined if use_handl = true. 3d matrix containing noise data, arranged in the same order as bbdata
+    #   bbfiducial: only defined if use_handl = true. 3d matrix containing fiducial values, arranged in the same order as bbdata
+    #   bbcovar: the covariance matrix
+    #   invcov: the inverse of the covariance matrix
+    #   cmb_tens: array - contains the cmb_tens template
+    #       indexes correspond to [polarization1][polarization2][ell] (e.g. if B is the first polarization mode, cmb_tens[0][0] lists the template's value for each ell that we consider, in order)
+    #   cmb_lens: array - contains the cmb_lens template, in the same format as cmb_tens
+    #   cmb_scal: array - contains the cmb_scal template, in the same format as cmb_tens
+    #
+    #   fgmodel: a FGModel object (class definition in fg_model.py) initialised with self.config
+    #   params: a ParameterManager object (class definition in param_manager.py) initialised with self.config
+    #
+
     def __init__(self, args):
         """
         Initialize from the command line arguments.
@@ -92,6 +142,16 @@ class BBCompSep(object):
         return mat[..., self.index_ut[0], self.index_ut[1]]
 
     def vector_to_matrix(self, vec):
+        # For a 1d input: 
+        #   Converts a 1D array of length ncross into a symetric nmaps x nmaps matrix. The elements in vec are placed into the matrix in the same order as the integers in vector_indecies.
+        #   (e.g. mat[0][0] = vec[0], mat[0][1] = mat[1][0] = vec[1] etc)
+        # For a 2d input:
+        #   carries out the above process piecewise to make a 3d array (i.e. mat[i] = vector_to_matrix(vec[i]))
+        #
+        # Input:
+        #   vec: a 1d array of length ncross or a 2d array of length m x ncross
+        # Output:
+        #   mat: a nmap x nmap array (1d input) or m x nmap x nmap array (2d input) constructed as described above
         if vec.ndim == 1:
             mat = np.zeros([self.nmaps, self.nmaps])
             mat[self.index_ut] = vec
@@ -307,6 +367,14 @@ class BBCompSep(object):
         return
 
     def integrate_seds(self, params):
+        # 
+        # Input:
+        #   params: a dictionary of {NAME: VAL} pairs for the parameters. sed is evaluated at these values
+        #
+        # Output:
+        #   fgscaling: a 4d array containing SED scalings for each component and frequency. Indecies represent (in order):
+        #       [component1][component2][freq_band1][freq_band2]
+        #   rot_matricies: a 1d array of rotation matricies for each frequency
         single_sed = np.zeros([self.fg_model.n_components,
                                self.nfreqs])
         comp_scaling = np.zeros([self.fg_model.n_components,
@@ -358,6 +426,14 @@ class BBCompSep(object):
         return fg_scaling, np.array(rot_matrices)
 
     def evaluate_power_spectra(self, params):
+        # Evaluates the power spectra for each component and each ell
+        #
+        # Input:
+        #   params: a dictionary of {NAME:VAL} pairs for the parameters. The power spectra will be evaluated at these ells
+        #
+        # Output:
+        #   fg_pspecrtra: the foreground power spectra for each component, polarization and ell. Indicies represent, in order:
+        #       [component][polarization1][polarization2][ell]
         fg_pspectra = np.zeros([self.fg_model.n_components, self.npol,
                                 self.npol, self.n_ell])
 
@@ -378,6 +454,15 @@ class BBCompSep(object):
         return fg_pspectra
 
     def model(self, params):
+        # 
+        # Input:
+        #   params: DICT of {NAME, VAL} pairs for all of the parameters. The model is evaluated at these values. 
+        #
+        # Output: 
+        #   theoretical values of D_ell for all maps, for all ranges of ell sampled. 
+        #   Indicies are (in order) bpws (i.e. the range of ells), the first map (columns are arranged first by band then by polarization), then the second map  
+        #   e.g. if we had two bands b1 and b2 and two polarizeraitons E and B, then the columns would correspond to b1E b1B b2E b2B)
+        #
         """
         Defines the total model and integrates over
         the bandpasses and windows.
@@ -389,7 +474,7 @@ class BBCompSep(object):
                     self.cmb_scal) * self.dl2cl
         # [nell,npol,npol]
         cmb_cell = np.transpose(cmb_cell, axes=[2, 0, 1])
-
+        
         # Kevin: this can be ignored for the standard case
         if self.config['cmb_model'].get('use_birefringence'):
             bi_angle = np.radians(params['birefringence'])
@@ -505,7 +590,7 @@ class BBCompSep(object):
         #     rotation) ===
         # * Coadded CMB + dust + synchrotron D_ells: cls_array_fg
         #   (sorry for misleading name!)
-        #   shape: [nfreqs, nfreqs, n_ell, npol, npol] 
+        #   shape: [nfreqs, nfreqs, n_ell, npol, npol]
 
         # Window convolution
         cls_array_list = np.zeros([self.n_bpws, self.nfreqs,
@@ -653,7 +738,7 @@ class BBCompSep(object):
         """
         Likelihood with priors.
         """
-        prior = self.params.lnprior(par)
+        prior = self.params.lnprior(self.get_jeffreys_numerical, par)
         if not np.isfinite(prior):
             return -np.inf
 
@@ -938,6 +1023,869 @@ class BBCompSep(object):
 
         return
 
+# Calculates the Jeffreys prior using numerical derivatives
+
+    def get_jeffreys_numerical(self, par_names, par):
+        # Calculates the jeffreys prior numerically, assuming a gaussian likelyhood
+        #
+        # input:
+        #   par_names: the names of the parameters which will be given Jeffreys priors. All other parameters are assumed to have independent priors. 
+        #   par: a list of the values of all free parameters. Jeffreys prior will be calculated at this point. 
+        #
+        # output: 
+        #   a float indicating the value of the jeffrey's prior
+        params = dict(zip(self.params.p_free_names,par)) | dict(self.params.p_fixed)
+        return np.sqrt(np.linalg.det(self.get_fisher_numerical(par_names, params)))
+
+    def get_fisher_numerical(self, par_names, params):
+        # Calculates the Fisher matrix for the parameters listed in par_names, ignoring the other parameters
+        #
+        # Input:
+        #   get_partials: function that calculates the partial derivatives of the model; defined in BBCompSep file
+        #   par_names: a list of the names of parameters which we will calculate the fisher matrix of
+        #   params: dictionary of {NAME:VAL} pairs for all of the parameters in the model. The fisher's matrix will be calculated at this point. 
+        
+        # [len(par_names), ell, nmap, nmap]
+        partials = self.get_partials_numerical(par_names, params)
+        partials = self.matrix_to_vector(partials)
+        partials = partials.reshape([len(par_names),self.ncross * self.n_bpws])
+        # [len(par_names), n_bpws * ncross]
+
+        F = np.matmul(np.matmul(partials,self.invcov), np.transpose(partials))
+        return F
+
+    def get_partials_numerical(self, par ,params):
+        # Returns a list of partial derivatives of the model
+        #
+        # Input: 
+        #   model: the function to differentiate
+        #   par: a list of the names of parameters that we wish to differentiate with respect to 
+        #   params: a dictionary of {NAME:VAL} pairs for all of the model's parameters. The partial derivative will be taken about this point. 
+        #   
+        # Output:
+        #   partials: a list of parial derivatives of the model. partials[i] is the partial derivative of the model with respect to par[i].
+        partials = [self.get_partial_numerical(par_1,params) for par_1 in par]
+        return np.array(partials)
+
+    def get_partial_numerical(self, par_1, params):
+        # Calculates the partial derivative of the model with respect to par_1, while params are kept constant. 
+        #
+        # Inputs:
+        #   model: the function to differentiate
+        #   par_1: the name of the parameter to differentiate with respect to
+        #   params: a dictionary giving {NAME: VAL} pairs for all parameters of the model. The partial derivative will be evaluated at this point
+        #
+        # Output:
+        #   derivative: an array, with the same dimentions as model, and indicies having the same meaning:
+        #   Indicies are (in order) bpws (i.e. the range of ells), the first map (columns are arranged first by band then by polarization, 
+        #   e.g. if we had two bands b1 and b2 and two polarizeraitons E and B, then the columns would correspond to b1E b1B b2E b2B)
+        fixed_params = params.copy()
+        par_1_val = fixed_params.pop(par_1)
+        f = lambda x: self.model({par_1:x}|fixed_params)
+        return self.derivative(f,par_1_val)
+
+    def derivative(self, f,x):
+        return (f(x+10**(-6))-f(x-10**(-6))) * 5*10**5
+
+# Calculates the Jeffrey's prior using analytical derivatives
+# TODO: analytic partial derivatives only work with the most basic model - they don't take into account bifringence, moments and rotations
+
+    def get_jeffreys_analytical(self, par_names, par):
+        # Calculates the jeffreys prior analytically, assuming a gaussian likelyhood
+        #
+        # input:
+        #   par_names: the names of the parameters which will be given Jeffreys priors. All other parameters are assumed to have independent priors. 
+        #   par: a list of the values of all free parameters. Jeffreys prior will be calculated at this point. 
+        #
+        # output: 
+        #   a float indicating the value of the jeffrey's prior
+        params = dict(zip(self.params.p_free_names,par)) | dict(self.params.p_fixed)
+        return np.sqrt(np.linalg.det(self.get_fisher_analytical(par_names, params)))
+
+    def get_fisher_analytical(self, par_names, params):
+        # Calculates the Fisher matrix for the parameters listed in par_names, ignoring the other parameters
+        #
+        # Input:
+        #   get_partials: function that calculates the partial derivatives of the model; defined in BBCompSep file
+        #   par_names: a list of the names of parameters which we will calculate the fisher matrix of
+        #   params: dictionary of {NAME:VAL} pairs for all of the parameters in the model. The fisher's matrix will be calculated at this point. 
+        
+        # [len(par_names), ell, nmap, nmap]
+        partials = self.get_partials_analytical(par_names, params)
+        partials = self.matrix_to_vector(partials)
+        partials = partials.reshape([len(par_names),self.ncross * self.n_bpws])
+        # [len(par_names), n_bpws * ncross]
+
+        F = np.matmul(np.matmul(partials,self.invcov), np.transpose(partials))
+        return F
+
+    def get_partials_analytical(self, par ,params):
+        # Returns a list of partial derivatives of the model
+        #
+        # Input: 
+        #   model: the function to differentiate
+        #   par: a list of the names of parameters that we wish to differentiate with respect to 
+        #   params: a dictionary of {NAME:VAL} pairs for all of the model's parameters. The partial derivative will be taken about this point. 
+        #   
+        # Output:
+        #   partials: a list of parial derivatives of the model. partials[i] is the partial derivative of the model with respect to par[i].
+        partials = [self.get_partial_analytical(par_1,params) for par_1 in par]
+        return np.array(partials)
+
+    def get_partial_analytical(self, par_1, params):
+        match par_1:
+            case "r_tensor":
+                return self.d_r_tensor(params)
+            case "A_lens":
+                return self.d_A_lens(params)
+            case "amp_d_bb":
+                return self.d_amp_d_bb(params)
+            case "amp_s_bb":
+                return self.d_amp_s_bb(params)
+            case "epsilon_ds":
+                return self.d_epsilon_ds(params)
+            case "alpha_d_bb":
+                return self.d_alpha_d_bb(params)
+            case "alpha_s_bb":
+                return self.d_alpha_s_bb(params)
+            case "beta_s":
+                return self.d_beta_s(params)
+            case "beta_d":
+                return self.d_beta_d(params)
+
+    def d_r_tensor(self, params):
+        # Calculates the partial derivative of model with respect to r_tensor
+        #
+        # Input:
+        #   params: DICT of {NAME, VAL} pairs for all of the parameters. The model is evaluated at these values. 
+        #
+        # Output: 
+        #   partial derivative of the model (with the same output format as model())
+        #   Indicies are (in order) bpws (i.e. the range of ells), the first map (columns are arranged first by band then by polarization, 
+        #   e.g. if we had two bands b1 and b2 and two polarizeraitons E and B, then the columns would correspond to b1E b1B b2E b2B)
+        #
+
+        # [npol,npol,nell]
+        d_cmb_cell = self.cmb_tens * self.dl2cl
+        # [nell,npol,npol]
+        d_cmb_cell = np.transpose(d_cmb_cell, axes=[2, 0, 1])
+        
+        # Add all components scaled in frequency (and HWP-rotated if needed)
+        # [nfreq, nfreq, nell, npol, npol]
+        cls_array_fg = np.zeros([self.nfreqs, self.nfreqs,
+                                 self.n_ell, self.npol, self.npol])
+
+        # SED scaling
+        cmb_scaling = np.ones(self.nfreqs)
+        cmb_rot = []
+        for f1 in range(self.nfreqs):
+            cs, crot = self.bpss[f1].convolve_sed(None, params)
+            cmb_scaling[f1] = cs
+            cmb_rot.append(crot)
+
+        for f1 in range(self.nfreqs):
+            # Note that we only need to fill in half of the frequencies
+            for f2 in range(f1, self.nfreqs):
+                cls = (rotate_cells_mat(cmb_rot[f2], cmb_rot[f1], d_cmb_cell) *
+                       cmb_scaling[f1] * cmb_scaling[f2])
+                cls_array_fg[f1, f2] = cls
+
+        # Window convolution
+        cls_array_list = np.zeros([self.n_bpws, self.nfreqs,
+                                   self.npol, self.nfreqs,
+                                   self.npol])
+        for f1 in range(self.nfreqs):
+            for p1 in range(self.npol):
+                m1 = f1*self.npol+p1
+                for f2 in range(f1, self.nfreqs):
+                    p0 = p1 if f1 == f2 else 0
+                    for p2 in range(p0, self.npol):
+                        m2 = f2*self.npol+p2
+                        windows = self.windows[self.vector_indices[m1, m2]]
+                        clband = np.dot(windows, cls_array_fg[f1, f2, :,
+                                                              p1, p2])
+                        cls_array_list[:, f1, p1, f2, p2] = clband
+                        if m1 != m2:
+                            cls_array_list[:, f2, p2, f1, p1] = clband
+
+        return cls_array_list.reshape([self.n_bpws, self.nmaps, self.nmaps])
+
+    def d_A_lens(self, params):
+        # Calculates the partial derivative of model with respect to r_tensor
+        # TODO: bifringence, moments and rotations
+        #
+        # Input:
+        #   params: DICT of {NAME, VAL} pairs for all of the parameters. The model is evaluated at these values. 
+        #
+        # Output: 
+        #   partial derivative of the model (with the same output format as model())
+        #   Indicies are (in order) bpws (i.e. the range of ells), the first map (columns are arranged first by band then by polarization, 
+        #   e.g. if we had two bands b1 and b2 and two polarizeraitons E and B, then the columns would correspond to b1E b1B b2E b2B)
+        #
+
+        # [npol,npol,nell]
+        d_cmb_cell = self.cmb_lens * self.dl2cl
+        # [nell,npol,npol]
+        d_cmb_cell = np.transpose(d_cmb_cell, axes=[2, 0, 1])
+        
+        # Add all components scaled in frequency (and HWP-rotated if needed)
+        # [nfreq, nfreq, nell, npol, npol]
+        cls_array_fg = np.zeros([self.nfreqs, self.nfreqs,
+                                 self.n_ell, self.npol, self.npol])
+
+        # SED scaling
+        cmb_scaling = np.ones(self.nfreqs)
+        cmb_rot = []
+        for f1 in range(self.nfreqs):
+            cs, crot = self.bpss[f1].convolve_sed(None, params)
+            cmb_scaling[f1] = cs
+            cmb_rot.append(crot)
+
+        for f1 in range(self.nfreqs):
+            # Note that we only need to fill in half of the frequencies
+            for f2 in range(f1, self.nfreqs):
+                cls = (rotate_cells_mat(cmb_rot[f2], cmb_rot[f1], d_cmb_cell) *
+                       cmb_scaling[f1] * cmb_scaling[f2])
+                cls_array_fg[f1, f2] = cls
+
+        # TODO: Moments
+        # === Theory model computation ends here (except polarization angle
+        #     rotation) ===
+        # * Coadded CMB + dust + synchrotron D_ells: cls_array_fg
+        #   (sorry for misleading name!)
+        #   shape: [nfreqs, nfreqs, n_ell, npol, npol]
+
+        # Window convolution
+        cls_array_list = np.zeros([self.n_bpws, self.nfreqs,
+                                   self.npol, self.nfreqs,
+                                   self.npol])
+        for f1 in range(self.nfreqs):
+            for p1 in range(self.npol):
+                m1 = f1*self.npol+p1
+                for f2 in range(f1, self.nfreqs):
+                    p0 = p1 if f1 == f2 else 0
+                    for p2 in range(p0, self.npol):
+                        m2 = f2*self.npol+p2
+                        windows = self.windows[self.vector_indices[m1, m2]]
+                        clband = np.dot(windows, cls_array_fg[f1, f2, :,
+                                                              p1, p2])
+                        cls_array_list[:, f1, p1, f2, p2] = clband
+                        if m1 != m2:
+                            cls_array_list[:, f2, p2, f1, p1] = clband
+
+        return cls_array_list.reshape([self.n_bpws, self.nmaps, self.nmaps])
+
+    def d_amp_d_bb(self, params):
+        # Calculates the partial derivative of model with respect to r_tensor
+        # TODO: bifringence, moments and rotations
+        #
+        # Input:
+        #   params: DICT of {NAME, VAL} pairs for all of the parameters. The model is evaluated at these values. 
+        #
+        # Output: 
+        #   partial derivative of the model (with the same output format as model())
+        #   Indicies are (in order) bpws (i.e. the range of ells), the first map (columns are arranged first by band then by polarization, 
+        #   e.g. if we had two bands b1 and b2 and two polarizeraitons E and B, then the columns would correspond to b1E b1B b2E b2B)
+        #
+
+        # Kevin: This is evaluating the foreground SEDs at the SO channels'
+        # frequencies
+        # [ncomp, ncomp, nfreq, nfreq], [ncomp, nfreq,[matrix]]
+        fg_scaling, rot_m = self.integrate_seds(params)
+
+        # Kevin: This is the power law model for foreground power spectra
+        # [ncomp,npol,npol,nell]
+        fg_cell = self.evaluate_power_spectra(params)
+
+        # Add all components scaled in frequency (and HWP-rotated if needed)
+        # [nfreq, nfreq, nell, npol, npol]
+        cls_array_fg = np.zeros([self.nfreqs, self.nfreqs,
+                                 self.n_ell, self.npol, self.npol])
+        # [ncomp,nell,npol,npol]
+        fg_cell = np.transpose(fg_cell, axes=[0, 3, 1, 2])
+
+        for f1 in range(self.nfreqs):
+            # Note that we only need to fill in half of the frequencies
+            for f2 in range(f1, self.nfreqs):
+                mat1 = rot_m[0, f1]
+                mat2 = rot_m[0, f2]
+                clrot = rotate_cells_mat(mat2, mat1, fg_cell[0])/params["amp_d_bb"]
+                cls = clrot * fg_scaling[0, 0, f1, f2]
+
+
+                mat1 = rot_m[0, f1]
+                mat2 = rot_m[1, f2]
+                cl_cross = np.zeros((self.n_ell,
+                                        self.npol, self.npol))
+                cl_cross[:, 0, 0] = np.sqrt(
+                    fg_cell[0, :, 0, 0] * fg_cell[1, :, 0, 0]
+                )
+                clrot = rotate_cells_mat(mat2, mat1, cl_cross)/(2*params["amp_d_bb"])
+                cls += clrot * fg_scaling[0, 1, f1, f2]
+                
+
+                mat1 = rot_m[1, f1]
+                mat2 = rot_m[0, f2]
+                cl_cross = np.zeros((self.n_ell,
+                                        self.npol, self.npol))
+                cl_cross[:, 0, 0] = np.sqrt(
+                    fg_cell[1, :, 0, 0] * fg_cell[0, :, 0, 0]
+                )
+                clrot = rotate_cells_mat(mat2, mat1, cl_cross)/(2*params["amp_d_bb"])
+                cls += clrot * fg_scaling[1, 0, f1, f2]
+
+                cls_array_fg[f1, f2] = cls
+
+        # === Theory model computation ends here (except polarization angle
+        #     rotation) ===
+        # * Coadded CMB + dust + synchrotron D_ells: cls_array_fg
+        #   (sorry for misleading name!)
+        #   shape: [nfreqs, nfreqs, n_ell, npol, npol]
+
+        # Window convolution
+        cls_array_list = np.zeros([self.n_bpws, self.nfreqs,
+                                   self.npol, self.nfreqs,
+                                   self.npol])
+        for f1 in range(self.nfreqs):
+            for p1 in range(self.npol):
+                m1 = f1*self.npol+p1
+                for f2 in range(f1, self.nfreqs):
+                    p0 = p1 if f1 == f2 else 0
+                    for p2 in range(p0, self.npol):
+                        m2 = f2*self.npol+p2
+                        windows = self.windows[self.vector_indices[m1, m2]]
+                        clband = np.dot(windows, cls_array_fg[f1, f2, :,
+                                                              p1, p2])
+                        cls_array_list[:, f1, p1, f2, p2] = clband
+                        if m1 != m2:
+                            cls_array_list[:, f2, p2, f1, p1] = clband
+
+        return cls_array_list.reshape([self.n_bpws, self.nmaps, self.nmaps])
+
+    def d_amp_s_bb(self, params):
+        # Calculates the partial derivative of model with respect to r_tensor
+        # TODO: bifringence, moments and rotations
+        #
+        # Input:
+        #   params: DICT of {NAME, VAL} pairs for all of the parameters. The model is evaluated at these values. 
+        #
+        # Output: 
+        #   partial derivative of the model (with the same output format as model())
+        #   Indicies are (in order) bpws (i.e. the range of ells), the first map (columns are arranged first by band then by polarization, 
+        #   e.g. if we had two bands b1 and b2 and two polarizeraitons E and B, then the columns would correspond to b1E b1B b2E b2B)
+        #
+
+        # Kevin: This is evaluating the foreground SEDs at the SO channels'
+        # frequencies
+        # [ncomp, ncomp, nfreq, nfreq], [ncomp, nfreq,[matrix]]
+        fg_scaling, rot_m = self.integrate_seds(params)
+
+        # Kevin: This is the power law model for foreground power spectra
+        # [ncomp,npol,npol,nell]
+        fg_cell = self.evaluate_power_spectra(params)
+
+        # Add all components scaled in frequency (and HWP-rotated if needed)
+        # [nfreq, nfreq, nell, npol, npol]
+        cls_array_fg = np.zeros([self.nfreqs, self.nfreqs,
+                                 self.n_ell, self.npol, self.npol])
+        # [ncomp,nell,npol,npol]
+        fg_cell = np.transpose(fg_cell, axes=[0, 3, 1, 2])
+
+        for f1 in range(self.nfreqs):
+            # Note that we only need to fill in half of the frequencies
+            for f2 in range(f1, self.nfreqs):
+                mat1 = rot_m[1, f1]
+                mat2 = rot_m[1, f2]
+                clrot = rotate_cells_mat(mat2, mat1, fg_cell[1])/params["amp_s_bb"]
+                cls = clrot * fg_scaling[1, 1, f1, f2]
+
+
+                mat1 = rot_m[0, f1]
+                mat2 = rot_m[1, f2]
+                cl_cross = np.zeros((self.n_ell,
+                                        self.npol, self.npol))
+                cl_cross[:, 0, 0] = np.sqrt(
+                    fg_cell[0, :, 0, 0] * fg_cell[1, :, 0, 0]
+                )
+                clrot = rotate_cells_mat(mat2, mat1, cl_cross)/(2*params["amp_s_bb"])
+                cls += clrot * fg_scaling[0, 1, f1, f2]
+                
+
+                mat1 = rot_m[1, f1]
+                mat2 = rot_m[0, f2]
+                cl_cross = np.zeros((self.n_ell,
+                                        self.npol, self.npol))
+                cl_cross[:, 0, 0] = np.sqrt(
+                    fg_cell[1, :, 0, 0] * fg_cell[0, :, 0, 0]
+                )
+                clrot = rotate_cells_mat(mat2, mat1, cl_cross)/(2*params["amp_s_bb"])
+                cls += clrot * fg_scaling[1, 0, f1, f2]
+
+                cls_array_fg[f1, f2] = cls
+
+        # === Theory model computation ends here (except polarization angle
+        #     rotation) ===
+        # * Coadded CMB + dust + synchrotron D_ells: cls_array_fg
+        #   (sorry for misleading name!)
+        #   shape: [nfreqs, nfreqs, n_ell, npol, npol]
+
+        # Window convolution
+        cls_array_list = np.zeros([self.n_bpws, self.nfreqs,
+                                   self.npol, self.nfreqs,
+                                   self.npol])
+        for f1 in range(self.nfreqs):
+            for p1 in range(self.npol):
+                m1 = f1*self.npol+p1
+                for f2 in range(f1, self.nfreqs):
+                    p0 = p1 if f1 == f2 else 0
+                    for p2 in range(p0, self.npol):
+                        m2 = f2*self.npol+p2
+                        windows = self.windows[self.vector_indices[m1, m2]]
+                        clband = np.dot(windows, cls_array_fg[f1, f2, :,
+                                                              p1, p2])
+                        cls_array_list[:, f1, p1, f2, p2] = clband
+                        if m1 != m2:
+                            cls_array_list[:, f2, p2, f1, p1] = clband
+
+        return cls_array_list.reshape([self.n_bpws, self.nmaps, self.nmaps])
+
+    def d_epsilon_ds(self, params):
+        # Calculates the partial derivative of model with respect to r_tensor
+        # TODO: bifringence, moments and rotations
+        #
+        # Input:
+        #   params: DICT of {NAME, VAL} pairs for all of the parameters. The model is evaluated at these values. 
+        #
+        # Output: 
+        #   partial derivative of the model (with the same output format as model())
+        #   Indicies are (in order) bpws (i.e. the range of ells), the first map (columns are arranged first by band then by polarization, 
+        #   e.g. if we had two bands b1 and b2 and two polarizeraitons E and B, then the columns would correspond to b1E b1B b2E b2B)
+        #
+
+        # Kevin: This is evaluating the foreground SEDs at the SO channels'
+        # frequencies
+        # [ncomp, ncomp, nfreq, nfreq], [ncomp, nfreq,[matrix]]
+        fg_scaling, rot_m = self.integrate_seds(params)
+
+        # Kevin: This is the power law model for foreground power spectra
+        # [ncomp,npol,npol,nell]
+        fg_cell = self.evaluate_power_spectra(params)
+
+        # Add all components scaled in frequency (and HWP-rotated if needed)
+        # [nfreq, nfreq, nell, npol, npol]
+        cls_array_fg = np.zeros([self.nfreqs, self.nfreqs,
+                                 self.n_ell, self.npol, self.npol])
+        # [ncomp,nell,npol,npol]
+        fg_cell = np.transpose(fg_cell, axes=[0, 3, 1, 2])
+
+        for f1 in range(self.nfreqs):
+            # Note that we only need to fill in half of the frequencies
+            for f2 in range(f1, self.nfreqs):
+
+                mat1 = rot_m[0, f1]
+                mat2 = rot_m[1, f2]
+                cl_cross = np.zeros((self.n_ell,
+                                        self.npol, self.npol))
+                cl_cross[:, 0, 0] = np.sqrt(
+                    fg_cell[0, :, 0, 0] * fg_cell[1, :, 0, 0]
+                )
+                clrot = rotate_cells_mat(mat2, mat1, cl_cross)/(params["epsilon_ds"])
+                cls = clrot * fg_scaling[0, 1, f1, f2]
+                
+
+                mat1 = rot_m[1, f1]
+                mat2 = rot_m[0, f2]
+                cl_cross = np.zeros((self.n_ell,
+                                        self.npol, self.npol))
+                cl_cross[:, 0, 0] = np.sqrt(
+                    fg_cell[1, :, 0, 0] * fg_cell[0, :, 0, 0]
+                )
+                clrot = rotate_cells_mat(mat2, mat1, cl_cross)/(params["epsilon_ds"])
+                cls += clrot * fg_scaling[1, 0, f1, f2]
+
+                cls_array_fg[f1, f2] = cls
+
+        # === Theory model computation ends here (except polarization angle
+        #     rotation) ===
+        # * Coadded CMB + dust + synchrotron D_ells: cls_array_fg
+        #   (sorry for misleading name!)
+        #   shape: [nfreqs, nfreqs, n_ell, npol, npol]
+
+        # Window convolution
+        cls_array_list = np.zeros([self.n_bpws, self.nfreqs,
+                                   self.npol, self.nfreqs,
+                                   self.npol])
+        for f1 in range(self.nfreqs):
+            for p1 in range(self.npol):
+                m1 = f1*self.npol+p1
+                for f2 in range(f1, self.nfreqs):
+                    p0 = p1 if f1 == f2 else 0
+                    for p2 in range(p0, self.npol):
+                        m2 = f2*self.npol+p2
+                        windows = self.windows[self.vector_indices[m1, m2]]
+                        clband = np.dot(windows, cls_array_fg[f1, f2, :,
+                                                              p1, p2])
+                        cls_array_list[:, f1, p1, f2, p2] = clband
+                        if m1 != m2:
+                            cls_array_list[:, f2, p2, f1, p1] = clband
+
+        return cls_array_list.reshape([self.n_bpws, self.nmaps, self.nmaps])
+
+    def d_alpha_d_bb(self, params):
+        # Calculates the partial derivative of model with respect to alpha_d_bb
+        # TODO: bifringence, moments and rotations
+        # TODO: code currently relies on ell_0 = 80
+        # Input:
+        #   params: DICT of {NAME, VAL} pairs for all of the parameters. The model is evaluated at these values. 
+        #
+        # Output: 
+        #   partial derivative of the model (with the same output format as model())
+        #   Indicies are (in order) bpws (i.e. the range of ells), the first map (columns are arranged first by band then by polarization, 
+        #   e.g. if we had two bands b1 and b2 and two polarizeraitons E and B, then the columns would correspond to b1E b1B b2E b2B)
+        #
+
+        # Kevin: This is evaluating the foreground SEDs at the SO channels'
+        # frequencies
+        # [ncomp, ncomp, nfreq, nfreq], [ncomp, nfreq,[matrix]]
+        fg_scaling, rot_m = self.integrate_seds(params)
+
+        # Kevin: This is the power law model for foreground power spectra
+        # [ncomp,npol,npol,nell]
+        fg_cell = self.evaluate_power_spectra(params)
+
+        # Add all components scaled in frequency (and HWP-rotated if needed)
+        # [nfreq, nfreq, nell, npol, npol]
+        cls_array_fg = np.zeros([self.nfreqs, self.nfreqs,
+                                 self.n_ell, self.npol, self.npol])
+        # [ncomp,nell,npol,npol]
+        fg_cell = np.transpose(fg_cell, axes=[0, 3, 1, 2])
+
+        for f1 in range(self.nfreqs):
+            # Note that we only need to fill in half of the frequencies
+            for f2 in range(f1, self.nfreqs):
+                mat1 = rot_m[0, f1]
+                mat2 = rot_m[0, f2]
+                clrot = rotate_cells_mat(mat2, mat1, fg_cell[0])
+                cls = clrot * fg_scaling[0, 0, f1, f2]
+
+
+                mat1 = rot_m[0, f1]
+                mat2 = rot_m[1, f2]
+                cl_cross = np.zeros((self.n_ell,
+                                        self.npol, self.npol))
+                cl_cross[:, 0, 0] = np.sqrt(
+                    fg_cell[0, :, 0, 0] * fg_cell[1, :, 0, 0]
+                )
+                clrot = rotate_cells_mat(mat2, mat1, cl_cross)/2
+                cls += clrot * fg_scaling[0, 1, f1, f2]
+                
+
+                mat1 = rot_m[1, f1]
+                mat2 = rot_m[0, f2]
+                cl_cross = np.zeros((self.n_ell,
+                                        self.npol, self.npol))
+                cl_cross[:, 0, 0] = np.sqrt(
+                    fg_cell[1, :, 0, 0] * fg_cell[0, :, 0, 0]
+                )
+                clrot = rotate_cells_mat(mat2, mat1, cl_cross)/2
+                cls += clrot * fg_scaling[1, 0, f1, f2]
+
+                cls_array_fg[f1, f2] = cls
+
+        # Complete the calculation (need to multiply by log(ell/ell_0))
+        ells = self.bpw_l.reshape(1,1,-1,1,1)
+        cls_array_fg = cls_array_fg * np.log(ells/80)
+
+        # === Theory model computation ends here (except polarization angle
+        #     rotation) ===
+        # * Coadded CMB + dust + synchrotron D_ells: cls_array_fg
+        #   (sorry for misleading name!)
+        #   shape: [nfreqs, nfreqs, n_ell, npol, npol]
+
+        # Window convolution
+        cls_array_list = np.zeros([self.n_bpws, self.nfreqs,
+                                   self.npol, self.nfreqs,
+                                   self.npol])
+        for f1 in range(self.nfreqs):
+            for p1 in range(self.npol):
+                m1 = f1*self.npol+p1
+                for f2 in range(f1, self.nfreqs):
+                    p0 = p1 if f1 == f2 else 0
+                    for p2 in range(p0, self.npol):
+                        m2 = f2*self.npol+p2
+                        windows = self.windows[self.vector_indices[m1, m2]]
+                        clband = np.dot(windows, cls_array_fg[f1, f2, :,
+                                                              p1, p2])
+                        cls_array_list[:, f1, p1, f2, p2] = clband
+                        if m1 != m2:
+                            cls_array_list[:, f2, p2, f1, p1] = clband
+
+        return cls_array_list.reshape([self.n_bpws, self.nmaps, self.nmaps])
+
+    def d_alpha_s_bb(self, params):
+        # Calculates the partial derivative of model with respect to r_tensor
+        # TODO: bifringence, moments and rotations
+        # TODO: code currently relies on ell_0 = 80
+        # Input:
+        #   params: DICT of {NAME, VAL} pairs for all of the parameters. The model is evaluated at these values. 
+        #
+        # Output: 
+        #   partial derivative of the model (with the same output format as model())
+        #   Indicies are (in order) bpws (i.e. the range of ells), the first map (columns are arranged first by band then by polarization, 
+        #   e.g. if we had two bands b1 and b2 and two polarizeraitons E and B, then the columns would correspond to b1E b1B b2E b2B)
+        #
+
+        # Kevin: This is evaluating the foreground SEDs at the SO channels'
+        # frequencies
+        # [ncomp, ncomp, nfreq, nfreq], [ncomp, nfreq,[matrix]]
+        fg_scaling, rot_m = self.integrate_seds(params)
+
+        # Kevin: This is the power law model for foreground power spectra
+        # [ncomp,npol,npol,nell]
+        fg_cell = self.evaluate_power_spectra(params)
+
+        # Add all components scaled in frequency (and HWP-rotated if needed)
+        # [nfreq, nfreq, nell, npol, npol]
+        cls_array_fg = np.zeros([self.nfreqs, self.nfreqs,
+                                 self.n_ell, self.npol, self.npol])
+        # [ncomp,nell,npol,npol]
+        fg_cell = np.transpose(fg_cell, axes=[0, 3, 1, 2])
+
+        for f1 in range(self.nfreqs):
+            # Note that we only need to fill in half of the frequencies
+            for f2 in range(f1, self.nfreqs):
+                mat1 = rot_m[1, f1]
+                mat2 = rot_m[1, f2]
+                clrot = rotate_cells_mat(mat2, mat1, fg_cell[1])
+                cls = clrot * fg_scaling[1, 1, f1, f2]
+
+
+                mat1 = rot_m[0, f1]
+                mat2 = rot_m[1, f2]
+                cl_cross = np.zeros((self.n_ell,
+                                        self.npol, self.npol))
+                cl_cross[:, 0, 0] = np.sqrt(
+                    fg_cell[0, :, 0, 0] * fg_cell[1, :, 0, 0]
+                )
+                clrot = rotate_cells_mat(mat2, mat1, cl_cross)/2
+                cls += clrot * fg_scaling[0, 1, f1, f2]
+                
+
+                mat1 = rot_m[1, f1]
+                mat2 = rot_m[0, f2]
+                cl_cross = np.zeros((self.n_ell,
+                                        self.npol, self.npol))
+                cl_cross[:, 0, 0] = np.sqrt(
+                    fg_cell[1, :, 0, 0] * fg_cell[0, :, 0, 0]
+                )
+                clrot = rotate_cells_mat(mat2, mat1, cl_cross)/2
+                cls += clrot * fg_scaling[1, 0, f1, f2]
+
+                cls_array_fg[f1, f2] = cls
+
+        # Complete the calculation (need to multiply by log(ell/ell_0))
+        ells = self.bpw_l.reshape(1,1,-1,1,1)
+        cls_array_fg = cls_array_fg * np.log(ells/80)
+
+        # === Theory model computation ends here (except polarization angle
+        #     rotation) ===
+        # * Coadded CMB + dust + synchrotron D_ells: cls_array_fg
+        #   (sorry for misleading name!)
+        #   shape: [nfreqs, nfreqs, n_ell, npol, npol]
+
+        # Window convolution
+        cls_array_list = np.zeros([self.n_bpws, self.nfreqs,
+                                   self.npol, self.nfreqs,
+                                   self.npol])
+        for f1 in range(self.nfreqs):
+            for p1 in range(self.npol):
+                m1 = f1*self.npol+p1
+                for f2 in range(f1, self.nfreqs):
+                    p0 = p1 if f1 == f2 else 0
+                    for p2 in range(p0, self.npol):
+                        m2 = f2*self.npol+p2
+                        windows = self.windows[self.vector_indices[m1, m2]]
+                        clband = np.dot(windows, cls_array_fg[f1, f2, :,
+                                                              p1, p2])
+                        cls_array_list[:, f1, p1, f2, p2] = clband
+                        if m1 != m2:
+                            cls_array_list[:, f2, p2, f1, p1] = clband
+
+        return cls_array_list.reshape([self.n_bpws, self.nmaps, self.nmaps])
+
+    def integrate_sed_derivatives(self, params):
+        # Calculates the derivatives of the SED with respect to the betas (assuming an exponential dependence on beta, (nu/nu_0)^beta )
+        #
+        # Input:
+        #   params: a dictionary of {NAME: VAL} pairs for the parameters. sed is evaluated at these values
+        #
+        # Output:
+        #   fgscaling: a 4d array containing SED scalings for each component and frequency. Indecies represent (in order):
+        #       [component1][component2][freq_band1][freq_band2]
+        #   rot_matricies: a 1d array of rotation matricies for each frequency
+
+        single_sed = np.zeros([self.fg_model.n_components,
+                               self.nfreqs])
+        single_d_sed = np.zeros([self.fg_model.n_components,
+                               self.nfreqs])
+
+        for i_c, c_name in enumerate(self.fg_model.component_names):
+
+            comp = self.fg_model.components[c_name]
+            nu0 = comp["nu0"]
+            units = comp['cmb_n0_norm']
+            sed_params = [params[comp['names_sed_dict'][k]]
+                          for k in comp['sed'].params]
+
+            sed = lambda nu: comp['sed'].eval(nu, *sed_params)
+            d_sed = lambda nu: comp['sed'].eval(nu, *sed_params) * np.log(nu/nu0)
+
+            for tn in range(self.nfreqs):
+                sed_b, _ = self.bpss[tn].convolve_sed(sed, params)
+                single_sed[i_c, tn] = sed_b * units
+                d_sed_b, _ = self.bpss[tn].convolve_sed(d_sed, params)
+                single_d_sed[i_c, tn] = d_sed_b * units
+
+        return single_sed, single_d_sed
+
+    def d_beta_d(self, params):
+        # TODO: brefringence, moments, roations
+        #
+        # Input:
+        #   params: DICT of {NAME, VAL} pairs for all of the parameters. The model is evaluated at these values. 
+        #
+        # Output: 
+        #   theoretical values of D_ell for all maps, for all ranges of ell sampled. 
+        #   Indicies are (in order) bpws (i.e. the range of ells), the first map (columns are arranged first by band then by polarization), then the second map  
+        #   e.g. if we had two bands b1 and b2 and two polarizeraitons E and B, then the columns would correspond to b1E b1B b2E b2B)
+        #
+
+        # [ncomp,nfreq]
+        sed, d_sed = self.integrate_sed_derivatives(params)
+
+        # Kevin: This is the power law model for foreground power spectra
+        # [ncomp,npol,npol,nell]
+        fg_cell = self.evaluate_power_spectra(params)
+
+        # Add all components scaled in frequency (and HWP-rotated if needed)
+        # [nfreq, nfreq, nell, npol, npol]
+        cls_array_fg = np.zeros([self.nfreqs, self.nfreqs,
+                                 self.n_ell, self.npol, self.npol])
+        # [ncomp,nell,npol,npol]
+        fg_cell = np.transpose(fg_cell, axes=[0, 3, 1, 2])
+
+        for f1 in range(self.nfreqs):
+            # Note that we only need to fill in half of the frequencies
+            for f2 in range(f1, self.nfreqs):
+
+                # Derivative of D_l^{d,BB}
+                clrot = fg_cell[0]
+                cls = clrot * (sed[0][f1] * d_sed[0][f2] + sed[0][f2] * d_sed[0][f1])
+
+                # Derivative of D_l^{sxd, BB}
+                cl_cross = np.zeros((self.n_ell,
+                                        self.npol, self.npol))
+                for i in range(self.npol):
+                
+                    cl_cross[:, i, i] = np.sqrt(
+                        fg_cell[1, :, i, i] * fg_cell[0, :, i, i]
+                    )
+                clrot = cl_cross
+                cls += clrot * (sed[1][f1]*d_sed[0][f2] + sed[1][f2]*d_sed[0][f1]) * params["epsilon_ds"]
+
+                cls_array_fg[f1, f2] = cls
+
+        # Window convolution
+        cls_array_list = np.zeros([self.n_bpws, self.nfreqs,
+                                   self.npol, self.nfreqs,
+                                   self.npol])
+        for f1 in range(self.nfreqs):
+            for p1 in range(self.npol):
+                m1 = f1*self.npol+p1
+                for f2 in range(f1, self.nfreqs):
+                    p0 = p1 if f1 == f2 else 0
+                    for p2 in range(p0, self.npol):
+                        m2 = f2*self.npol+p2
+                        windows = self.windows[self.vector_indices[m1, m2]]
+                        clband = np.dot(windows, cls_array_fg[f1, f2, :,
+                                                              p1, p2])
+                        cls_array_list[:, f1, p1, f2, p2] = clband
+                        if m1 != m2:
+                            cls_array_list[:, f2, p2, f1, p1] = clband
+
+        return cls_array_list.reshape([self.n_bpws, self.nmaps, self.nmaps])
+
+    def d_beta_s(self, params):
+        # TODO: brefringence, moments, roations
+        #
+        # Input:
+        #   params: DICT of {NAME, VAL} pairs for all of the parameters. The model is evaluated at these values. 
+        #
+        # Output: 
+        #   theoretical values of D_ell for all maps, for all ranges of ell sampled. 
+        #   Indicies are (in order) bpws (i.e. the range of ells), the first map (columns are arranged first by band then by polarization), then the second map  
+        #   e.g. if we had two bands b1 and b2 and two polarizeraitons E and B, then the columns would correspond to b1E b1B b2E b2B)
+        #
+        """
+        Defines the total model and integrates over
+        the bandpasses and windows.
+        Parameters are 
+        """
+
+        # [ncomp,nfreq]
+        sed, d_sed = self.integrate_sed_derivatives(params)
+
+        # Kevin: This is the power law model for foreground power spectra
+        # [ncomp,npol,npol,nell]
+        fg_cell = self.evaluate_power_spectra(params)
+
+        # Add all components scaled in frequency (and HWP-rotated if needed)
+        # [nfreq, nfreq, nell, npol, npol]
+        cls_array_fg = np.zeros([self.nfreqs, self.nfreqs,
+                                 self.n_ell, self.npol, self.npol])
+        # [ncomp,nell,npol,npol]
+        fg_cell = np.transpose(fg_cell, axes=[0, 3, 1, 2])
+
+        for f1 in range(self.nfreqs):
+            # Note that we only need to fill in half of the frequencies
+            for f2 in range(f1, self.nfreqs):
+
+                # Derivative of D_l^{d,BB}
+                clrot = fg_cell[1]
+                cls = clrot * (sed[1][f1] * d_sed[1][f2] + sed[1][f2] * d_sed[1][f1])
+
+                # Derivative of D_l^{sxd, BB}
+                cl_cross = np.zeros((self.n_ell,
+                                        self.npol, self.npol))
+                for i in range(self.npol):
+                    cl_cross[:, i, i] = np.sqrt(
+                        fg_cell[1, :, i, i] * fg_cell[0, :, i, i]
+                    )
+                clrot = cl_cross
+                cls += clrot * (sed[0][f1]*d_sed[1][f2] + sed[0][f2]*d_sed[1][f1]) * params["epsilon_ds"]
+
+                cls_array_fg[f1, f2] = cls
+
+        # Window convolution
+        cls_array_list = np.zeros([self.n_bpws, self.nfreqs,
+                                   self.npol, self.nfreqs,
+                                   self.npol])
+        for f1 in range(self.nfreqs):
+            for p1 in range(self.npol):
+                m1 = f1*self.npol+p1
+                for f2 in range(f1, self.nfreqs):
+                    p0 = p1 if f1 == f2 else 0
+                    for p2 in range(p0, self.npol):
+                        m2 = f2*self.npol+p2
+                        windows = self.windows[self.vector_indices[m1, m2]]
+                        clband = np.dot(windows, cls_array_fg[f1, f2, :,
+                                                              p1, p2])
+                        cls_array_list[:, f1, p1, f2, p2] = clband
+                        if m1 != m2:
+                            cls_array_list[:, f2, p2, f1, p1] = clband
+
+        return cls_array_list.reshape([self.n_bpws, self.nmaps, self.nmaps])
+
 
 def main(args):
     """
@@ -991,3 +1939,6 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     main(args)
+
+class NotConvergedError(Exception):
+    pass

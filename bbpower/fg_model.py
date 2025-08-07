@@ -11,6 +11,45 @@ class FGModel:
     SED parameters, SED nu0, CMB nu0 normalization, and the foreground
     power spectrum parameters.
     """
+
+    # Attributes:
+    #
+    #   component_names: list of names of the components of the model, taken from the config file
+    #           (e.g. if dust is labelled component1 and synchtron component2, then component_names will be ["component1","component2"]
+    #
+    #   components: DICT of:
+    #
+    #       {COMPONENT: PARAM_DICT} pairs where PARAM_DICT is a dictionary containing the following elements
+    #           - {"decorr": BOOL}
+    #           - {"deccor_param_names": DECCOR_DICT} 
+    #                   Ommitted if decorr = False
+    #           - {"names_x_dict": X_DICT}
+    #                   where X_DICT contains {PARAM: COMPONENT2} pairs (where PARAM is the parameter name expressing correlation with foreground component "COMPONENT2")
+    #                   ommitted if there is no cross terms within "COMPONENT" in the config file
+    #           - {"sed_parameters": PARAM_DICT}
+    #                   where PARAM_DICT contains {PARAM:p} pairs, with p a list taking one of the following forms:
+    #                       [LABEL, "fixed", [VAL]]
+    #                       [LABEL, "Gaussian", [MEAN, STDEV]]
+    #                       [LABEL, "tophat", [MIN, INITIAL_VAL, MAX]]
+    #           - {"names_sed_dict": NAMES_DICT}
+    #                   where NAMES_DICT is a dictionary of {LABEL:NAME} where LABEL is the label used to describe a given part of the sed model (e.g. nu_0) and NAME is the associated parameter's name (e.g. nu_0_d)
+    #           - {"cmb_n0_norm": NORMALISATION} 
+    #           - {"nu0: VAL"}
+    #           - {"sed", SED_FUNC}
+    #                   where SED_FUNCTION gives the function for the component's sed, evaluated at the position of the fixed params
+    #           - {"names_cl_dict": NAMES_DICT}
+    #                   where NAMES_DICT is a dictionary of {LABEL:NAME} pairs where LABEL is the label used to describe a part of the Cl model (e.g. amp) and NAME is the parameter's name (e.g. amp_d_ee)
+    #           - {"names_moment_dict": DICT}
+    #           - {"cl": CL_FUNC_DICT}
+    #                   where CL_FUNC_DICT stores {POLARIZATION_MODE: CL_FUNC} pairs, where CL_FUNC is the cl function evaluated at the position of the fixed params
+    #
+    #
+    #   component_order: dictionary of {COMPONENT: ORDER} pairs, where COMPONENT is the name of the component and ORDER is an index describing the order in which components appear in the config file
+    #
+    #   n_components: the number of components present in the config file
+    #
+
+    
     def __init__(self, config):
         self.load_foregrounds(config)
         return
@@ -21,6 +60,13 @@ class FGModel:
                 yield key, component
 
     def load_foregrounds(self, config):
+        # Initialises the foreground-related attributes
+        #
+        # Input:
+        #   config: the configuration file
+        #
+        # Output: None
+        
         self.component_names = []
         self.components = {}
         self.component_order = {}
@@ -76,6 +122,7 @@ class FGModel:
             # Set units normalization
             if nu0 is not None:
                 comp['cmb_n0_norm'] = fgc.CMB('K_RJ').eval(nu0)
+                comp['nu0'] = nu0
             else:
                 comp['cmb_n0_norm'] = 1.
 
@@ -122,6 +169,7 @@ class FGModel:
                         (p2 in config['pol_channels'])):
                     cl_fnc = get_function(fgl, c)
                     comp['cl'][k] = cl_fnc(**(params_fgl[k]))
+
             self.components[key] = comp
             self.component_names.append(key)
             self.component_order[key] = i_comp
