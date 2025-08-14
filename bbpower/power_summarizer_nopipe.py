@@ -375,7 +375,7 @@ class BBPowerSummarizer(object):
         Run the cross-bundle power spectrum cooadder / covariance stage.
         """
         # Read cross-bundle power spectra
-        cells_file = f"{self.config['cells_dir']}/" + \
+        cells_file = f"{self.config['cells_dir'].format(sim_id=self.sim_id)}/" + \
             f"{self.config['cells_format'].format(sim_id=self.sim_id)}"
         if not os.path.isfile(cells_file):
             print("FILE NOT FOUND. SKIPPING: \n"
@@ -407,7 +407,7 @@ class BBPowerSummarizer(object):
             # Read simulations
             print("Reading simulations")
             cells_files = [
-                f"{self.config['cells_dir']}/"
+                f"{self.config['cells_dir'].format(sim_id=sim_id)}/"
                 f"{self.config['cells_format'].format(sim_id=sim_id)}"
                 for sim_id in self.sim_ids
             ]

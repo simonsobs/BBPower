@@ -370,7 +370,7 @@ class BBPowerSpecter(object):
 
         # Compile list of bundles
         self.nbundles = len(self.config["bundle_ids"])
-        map_file = f"{self.config['map_dir']}/" \
+        map_file = f"{self.config['map_dir'].format(sim_id=self.sim_id)}/" \
             + self.config['map_format'].format(sim_id=self.sim_id,
                                                n_bundles=self.nbundles,
                                                bundle_id=r"{bundle_id}")
@@ -397,7 +397,9 @@ class BBPowerSpecter(object):
 
         # Save output
         print("Saving to file")
-        cells_file = f"{self.config['cells_dir']}/" + \
+        cells_dir = self.config['cells_dir'].format(sim_id=self.sim_id)
+        os.makedirs(cells_dir, exist_ok=True)
+        cells_file = f"{cells_dir}/" + \
             f"{self.config['cells_format'].format(sim_id=self.sim_id)}"
         self.save_cell_to_file(cells,
                                self.tracers,
