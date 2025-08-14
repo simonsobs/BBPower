@@ -41,7 +41,81 @@ labels_dict = {
     'amp_s_bb': '$A_s^{BB}$',
     'alpha_s_ee': '$\\alpha_s^{EE}$',
     'amp_s_ee': '$A_s^{EE}$',
+    'amp_d_beta': '$B_d^{BB}$',
+    'gamma_d_beta': '$\\gamma_d^{BB}$',
+    'amp_s_beta': '$B_s^{BB}$',
+    'gamma_s_beta': '$\\gamma_s^{BB}$',
 }
+
+
+def read_cells_from_sacc(sacc_file, type, tracer_list, lmin, lmax,
+                         return_cov=False):
+    """
+    """
+    if isinstance(sacc_file, str):
+        s = sacc.Sacc.load_fits(sacc_file)
+    else:
+        s = sacc_file
+    cl_dict = {}
+    clerr_dict = {}
+    for tr1, tr2 in cwr(tracer_list, 2):
+        if return_cov:
+            l, cl, cov = s.get_ell_cl(type, tr1, tr2, return_cov=True)
+        else:
+            l, cl = s.get_ell_cl(type, tr1, tr2)
+        msk = np.logical_and(l <= lmax, l >= lmin)
+        l = l[msk]
+        cl_dict[(tr1, tr2)] = cl[msk]
+        if return_cov:
+            clerr_dict[(tr1, tr2)] = np.sqrt(np.fabs(np.diag(cov)))[msk]
+
+    if return_cov:
+        return l, cl_dict, clerr_dict
+    return l, cl_dict
+
+
+def plot_triangle(lb, tracer_labels, clb_dict, clb_err_dict, clb_best_dict,
+                  typ, text=None):
+    """
+    """
+    dim = len(list(tracer_labels.keys()))
+    typ_label = {"cl_bb": r"$D_\ell^{BB}$", "cl_eb": r"$D_\ell^{EB}$",
+                 "cl_be": r"$D_\ell^{BE}$", "cl_ee": r"$D_\ell^{EE}$"} 
+    fig, axes = plt.subplots(dim, dim,
+                             figsize=(15,10),
+                             constrained_layout=True,
+                             sharex=True)
+    for b1, t1 in enumerate(list(tracer_labels.keys())):
+        for b2, t2 in enumerate(list(tracer_labels.keys())):
+            if b2 < b1:
+                axes[b2, b1].axis('off')
+            else:
+                label = f"{tracer_labels[t1]} x {tracer_labels[t2]}"
+                ax = axes[b2, b1]
+                x, y, yerr, ybest = (lb, clb_dict[(t1, t2)],
+                                     clb_err_dict[(t1, t2)],
+                                     clb_best_dict[(t1, t2)])
+                simple_chi2 = np.sum((y - ybest)**2/yerr**2)
+                ndof = len(y)
+                ax.axhline(0, color="grey", linestyle="--")
+                ax.plot([], [], ls="",
+                        label=fr"$\chi^2/$ndof$={simple_chi2:.1f}/{ndof}$")
+                ax.errorbar(x, y, yerr, color="navy", marker=".",
+                            markerfacecolor="navy", linestyle="",
+                            label=label)
+                ax.plot(x, ybest, color="k")
+                ax.legend(fontsize=9)
+                if b1 == 0:
+                    ax.set_ylabel(typ_label[typ], fontsize=15)
+                if b2 == dim - 1:
+                    ax.set_xlabel(r"$\ell$", fontsize=16)
+
+    if text is not None:
+        ax_upper = fig.add_subplot(333)
+        ax_upper.plot([], [], color="w", label=text)
+        ax_upper.axis('off')
+        ax_upper.legend(fontsize=14)
+    return fig, axes
 
 
 class BBPlotter(object):
@@ -174,7 +248,6 @@ class BBPlotter(object):
                     # Plot file
                     fname = self.plot_dir + '/cls_'
                     fname += f"{t1}_x_{t2}_{typ}.png"
-                    print(fname)
                     f, (main, sub) = plt.subplots(
                         2, 1, sharex=True, figsize=(6, 4),
                         gridspec_kw={'height_ratios': [3, 1]}
@@ -267,6 +340,12 @@ class BBPlotter(object):
                             color="navy", marker=".", markerfacecolor="navy",
                             linestyle=""
                         )
+                        simple_chi2 = np.sum((y - cl_best[msk_best])**2/yerr**2)
+                        ndof = len(y)
+                        main.plot(
+                            [], [], ls="",
+                            label=fr"This panel: $\chi^2={simple_chi2:.1f}$ (ndof$={ndof}$)"  # noqa
+                        )
                     sub.set_ylabel(
                         r"$(C_\ell-C_\ell^{\rm best})/\sigma(C_\ell)$"
                     )
@@ -283,6 +362,35 @@ class BBPlotter(object):
                     plt.close()
                     lst += dtg.li(dtg.a(title, href=fname))
 
+            # Plots C_ells triangle plots
+            if not do_best:
+                return
+            for p1, p2 in cwr(self.pols, 2):
+                tracer_labels = {
+                    n: i+1
+                    for i, n in enumerate(list(self.s_cd_x.tracers.keys()))
+                }
+                x = p1 + p2
+                typ = 'cl_' + x
+                lb, clb = read_cells_from_sacc(
+                    self.s_cd_x, typ, list(tracer_labels.keys()),
+                    self.lmin, self.lmax, return_cov=False
+                )
+                _, clb_best = read_cells_from_sacc(
+                    self.s_best, typ, list(tracer_labels.keys()),
+                    self.lmin, self.lmax, return_cov=False
+                )
+                _, _, err = read_cells_from_sacc(
+                    self.s_cov, typ, list(tracer_labels.keys()),
+                    self.lmin, self.lmax, return_cov=True
+                )
+            fig, axes = plot_triangle(
+                lb, tracer_labels, clb, err, clb_best, typ,
+                text="Best fit:\n"+best_fit_label
+            )
+            fig.savefig(f"{self.plot_dir}/cells_cross_{typ}.pdf",
+                        bbox_inches="tight")
+            print(f"PLOTS {self.plot_dir}")
             dtg.div(dtg.a('Back to TOC', href='#contents'))
 
     def add_nulls(self):
@@ -299,7 +407,6 @@ class BBPlotter(object):
                 title = f"{t1} x {t2}"
                 fname = self.plot_dir + '/cls_null_'
                 fname += f"{t1}_x_{t2}.png"
-                print(fname)
                 plt.figure()
                 plt.title(title, fontsize=15)
                 for p1 in range(2):
@@ -373,7 +480,6 @@ class BBPlotter(object):
             # Save
             fname = self.plot_dir + '/triangle.pdf'
             g.export(fname)
-            print(fname)
             lst += dtg.li(dtg.a("Likelihood contours", href=fname))
 
             dtg.div(dtg.a('Back to TOC', href='#contents'))
@@ -409,7 +515,7 @@ class BBPlotter(object):
                 continue
             data = self.data[cl].format(sim_id=self.sim_id)
             if not os.path.isfile(data):
-                print(cl, "is not file")
+                print(cl, "is not a file")
                 continue
             if hasattr(self, f"plot_{cl}"):
                 if not self.config[f"plot_{cl}"]:
