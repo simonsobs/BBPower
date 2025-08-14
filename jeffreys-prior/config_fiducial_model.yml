@@ -3,9 +3,9 @@
 # a new plotter (without bbpipe depedency) is implemented!
 
 # These parameters are accessible to all stages
-chains_dir: &chains_dir "/scratch/gpfs/SIMONSOBS/users/kw6905/jeffreys/chains/all_channels/gaussian_fgs/fiducial_model/{sim_id:04}"  ## YOUR OUTPUT DIRECTORY
-data_dir: &data_dir "/home/kw6905/bbdev/BBPower/jeffreys-prior/data"  ## YOUR DATA DIRECTORY   
-covar_sacc: &covar_sacc !path [*data_dir, cells_coadded_cov_r0_Alens1_baseline_optimistic.fits]
+chains_dir: &chains_dir "/pscratch/sd/k/kwolz/jeffreys/chains/all_channels/gaussian_fgs/fiducial_model/{sim_id:04}"  ## YOUR OUTPUT DIRECTORY
+data_dir: &data_dir "/global/homes/k/kwolz/bbdev/BBPower/jeffreys-prior/data"  ## YOUR DATA DIRECTORY   
+covar_sacc: &covar_sacc "/global/homes/k/kwolz/bbdev/BBPower/jeffreys-prior/data/cells_coadded_cov_r0_Alens1_baseline_optimistic.fits"
 
 global:
     nside: 256
@@ -13,12 +13,12 @@ global:
     # Number of simulations to run (ignored if empty)
     sim_ids: [0]
     # Path where copy of config file will be stored
-    config_copy: !path [*chains_dir, config_copy.yaml]
+    config_copy: "/pscratch/sd/k/kwolz/jeffreys/chains/all_channels/gaussian_fgs/fiducial_model/{sim_id:04}/config_copy.yaml"
 
     # Input data or sims
     data:
         # Path to sacc file with cross-split power spectra
-        cells_coadded: !path [*data_dir, "cells_coadded_{sim_id:04}.fits"]
+        cells_coadded: "/global/homes/k/kwolz/bbdev/BBPower/jeffreys-prior/data/cells_coadded_{sim_id:04}.fits"
         # Path to sacc file with noise power spectra
         cells_noise: null
         # Path to sacc file with fiducial power spectra
@@ -45,10 +45,8 @@ global:
 theory_params:
     CMB:
         cmb_templates:
-        #- !path [*data_dir, camb_lens_nobb.dat]
-        #- !path [*data_dir, camb_lens_r1.dat]
-        - /scratch/gpfs/SIMONSOBS/external_data_e2e/camb_lens_nobb.dat
-        - /scratch/gpfs/SIMONSOBS/external_data_e2e/camb_lens_r1.dat
+        - "/global/homes/k/kwolz/bbdev/BBPower/jeffreys-prior/data/camb_lens_nobb.dat"
+        - "/global/homes/k/kwolz/bbdev/BBPower/jeffreys-prior/data/camb_lens_r1.dat"
         A_lens: 1.
         r_tensor: 0.
     dust:
@@ -78,7 +76,7 @@ BBCompSep:
     nrepeat: 50
     # If you chose emcee:
     nwalkers: 24
-    n_iters: 5000
+    n_iters: 2000
     # Resume sampling from earlier runs
     resume: False
     # Likelihood type (choose 'chi2' or 'h&l')
@@ -96,15 +94,15 @@ BBCompSep:
         # Template power spectrum. Should contained the lensed power spectra
         # with r=0 and r=1 respectively.
         cmb_templates:
-        - !path [*data_dir, camb_lens_nobb.dat]
-        - !path [*data_dir, camb_lens_r1.dat]
+        - "/global/homes/k/kwolz/bbdev/BBPower/jeffreys-prior/data/camb_lens_nobb.dat"
+        - "/global/homes/k/kwolz/bbdev/BBPower/jeffreys-prior/data/camb_lens_r1.dat"
 
         # Free parameters
         params:
             # tensor-to-scalar ratio
             # See below for the meaning of the different elements in the list.
-            #r_tensor: ['r_tensor', 'tophat', [-0.1, 0.00, 0.1]]
-            r_tensor: ['r_tensor', 'fixed', [0.00]]
+            r_tensor: ['r_tensor', 'tophat', [-0.1, 0.00, 0.1]]
+            #r_tensor: ['r_tensor', 'fixed', [0.00]]
             # Lensing amplitude
             A_lens: ['A_lens', 'tophat', [0.00, 1.0, 2.00]]
             #A_lens: ['A_lens', 'fixed', [1.00]]
@@ -140,8 +138,8 @@ BBCompSep:
                 #  - tophat: [lower edge, start value, upper edge]
                 #  - fixed: [parameter value]
                 # nu0-type parameters can only be fixed.
-                beta_d: ['beta_d', 'fixed', [1.54]]
-                #beta_d: ['beta_d', 'Gaussian', [1.54, 0.11]]
+                #beta_d: ['beta_d', 'fixed', [1.54]]
+                beta_d: ['beta_d', 'Gaussian', [1.54, 0.11]]
                 temp_d: ['temp', 'fixed', [20.]]
                 nu0_d: ['nu0', 'fixed', [353.]]
             cl_parameters:
@@ -152,17 +150,17 @@ BBCompSep:
                    alpha_d_ee: ['alpha', 'tophat', [-1., -0.32, 0.]]
                    l0_d_ee: ['ell0', 'fixed', [80.]]
                 BB:
-                   amp_d_bb: ['amp', 'fixed', [28.]]
-                   #amp_d_bb: ['amp', 'tophat', [0., 28., 80.]] # 46.
-                   alpha_d_bb: ['alpha', 'fixed', [-0.16]]
-                   #alpha_d_bb: ['alpha', 'tophat', [-0.5, -0.2, 0.5]]  # 0.0
+                   #amp_d_bb: ['amp', 'fixed', [28.]]
+                   amp_d_bb: ['amp', 'tophat', [0., 28., 80.]] # 46.
+                   #alpha_d_bb: ['alpha', 'fixed', [-0.16]]
+                   alpha_d_bb: ['alpha', 'tophat', [-0.5, -0.2, 0.5]]  # 0.0
                    l0_d_bb: ['ell0', 'fixed', [80.]]
             # If this component should be correlated with any other, list them here
             cross:
                 # In this case the list should contain:
                 # [component name, prior type, prior parameters]
-                #epsilon_ds: ['component_2', 'tophat', [-1., 0., 1.]]
-                epsilon_ds: ['component_2', 'fixed', [0.]]
+                epsilon_ds: ['component_2', 'tophat', [-1., 0., 1.]]
+                #epsilon_ds: ['component_2', 'fixed', [0.]]
             # Moment parameters. Only relevant if set "use_moments" to "True"
             moments:
                 # Define gammas for varying spectral indices of components
@@ -176,8 +174,8 @@ BBCompSep:
                 EE: ClPowerLaw
                 BB: ClPowerLaw
             sed_parameters:
-                #beta_s: ['beta_pl', 'Gaussian', [-3.0, 0.3]]
-                beta_s: ['beta_pl', 'fixed', [0.0]]
+                beta_s: ['beta_pl', 'Gaussian', [-3.0, 0.3]]
+                #beta_s: ['beta_pl', 'fixed', [0.0]]
                 nu0_s: ['nu0', 'fixed', [23.]]
             cl_parameters:
                 EE:
@@ -186,11 +184,11 @@ BBCompSep:
                     alpha_s_ee: ['alpha', 'tophat', [-2., -0.7, 0.]]
                     l0_s_ee: ['ell0', 'fixed', [80.]]
                 BB:
-                    #amp_s_bb: ['amp', 'tophat', [0., 2., "inf"]]
+                    amp_s_bb: ['amp', 'tophat', [0., 2., "inf"]]
                     #amp_s_bb: ['amp', 'tophat', [0., 1.45, 4.]]  # 1.6
-                    amp_s_bb: ['amp', 'fixed', [0.]]
-                    #alpha_s_bb: ['alpha', 'tophat', [-2., -1.3, 0.]]  # 0.-93
-                    alpha_s_bb: ['alpha', 'fixed', [0.]]
+                    #amp_s_bb: ['amp', 'fixed', [0.]]
+                    alpha_s_bb: ['alpha', 'tophat', [-2., -1.3, 0.]]  # 0.-93
+                    #alpha_s_bb: ['alpha', 'fixed', [0.]]
                     l0_s_bb: ['ell0', 'fixed', [80.]]
             # Moment parameters. Only relevant if set "use_moments" to "True"
             moments:
