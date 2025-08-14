@@ -1,5 +1,5 @@
-base_dir: &base_dir /global/cfs/cdirs/sobs/sims/fisher_2025
-aux_dir: &aux_dir /global/cfs/cdirs/sobs/sims/so_extended/bbpower_input/input_auxiliaries
+base_dir: &base_dir /pscratch/sd/k/kwolz/wolzetal2024
+aux_dir: &aux_dir /pscratch/sd/k/kwolz/wolzetal2024/bbpower_input
 
 global:
     nside: 512
@@ -9,7 +9,7 @@ global:
     sim_ids: 0,499  # Accepts formats [id] and [id_start],[id_stop]
 
     # Path where copy of config file will be stored
-    config_copy: !path [*base_dir, /coadded_sims/gaussian/Alens0.3/fsky14/config_copy.yaml]
+    config_copy: !path [*base_dir, cells_sims/gaussian/Alens1/NOMINAL_5YR/config_copy.yaml]
     
     # Bundles for each map set
     bundle_ids: [1, 2, 3, 4]
@@ -19,54 +19,54 @@ global:
     map_sets:
         band1:  # 27 GHz
             beam_file: !path [*aux_dir, beams/beam_LF1.txt]
-            bandpass_file: !path [*aux_dir, bandpasses/bpss_1.txt]
+            bandpass_file: !path [*aux_dir, bandpasses/bandpass_delta_LF1.dat]
         band2:  # 39 GHz
             beam_file: !path [*aux_dir, beams/beam_LF2.txt]
-            bandpass_file: !path [*aux_dir, bandpasses/bpss_2.txt]
+            bandpass_file: !path [*aux_dir, bandpasses/bandpass_delta_LF2.dat]
         band3:  # 93 GHz
             beam_file: !path [*aux_dir, beams/beam_MF1.txt]
-            bandpass_file: !path [*aux_dir, bandpasses/bpss_3.txt]
+            bandpass_file: !path [*aux_dir, bandpasses/bandpass_delta_MF1.dat]
         band4:  # 145 GHz
             beam_file: !path [*aux_dir, beams/beam_MF2.txt]
-            bandpass_file: !path [*aux_dir, bandpasses/bpss_4.txt]
+            bandpass_file: !path [*aux_dir, bandpasses/bandpass_delta_MF2.dat]
         band5:  # 225 GHz
             beam_file: !path [*aux_dir, beams/beam_UHF1.txt]
-            bandpass_file: !path [*aux_dir, bandpasses/bpss_5.txt]
+            bandpass_file: !path [*aux_dir, bandpasses/bandpass_delta_UHF1.dat]
         band6:  # 280 GHz
             beam_file: !path [*aux_dir, beams/beam_UHF2.txt]
-            bandpass_file: !path [*aux_dir, bandpasses/bpss_6.txt]
+            bandpass_file: !path [*aux_dir, bandpasses/bandpass_delta_UHF2.dat]
 
     # Output spectrum file(s) for cross-bundle spectra
-    cells_dir: !path [*base_dir, cells_sims/gaussian/Alens0.3/NOMINAL_4YR/fsky14]
+    cells_dir: !path [*base_dir, "cells_sims/gaussian/Alens1/NOMINAL_5YR/wolzetal2024/{sim_id:04d}"]
     # Accept placeholder: sim_id (optional)
-    cells_format: "{sim_id:04d}/cells_all_bundles_sim{sim_id:04d}.fits"
+    cells_format: "cells_all_bundles_sim{sim_id:04d}.fits"
 
 BBPowerSpecter:
     # Input map bundles
     # Maps are expected to be stored in arrays of shape [n_map_sets*3, n_pix]
-    map_dir: !path [*base_dir, /coadded_sims/gaussian/Alens0.3/NOMINAL_4YR/fsky14]
+    map_dir: !path [*base_dir, "/coadded_sims/gaussian/Alens1/NOMINAL_5YR/wolzetal2024/{sim_id:04d}"]
     # Expect placeholders: bundle_id, n_bundles (mandatory), sim_id (optional)
-    map_format: "{sim_id:04d}/SO_SAT_obs_map_split_{bundle_id}of{n_bundles}.fits"
+    map_format: "SO_SAT_obs_map_split_{bundle_id}of{n_bundles}.fits"
 
     # Analysis mask
     # Assume a single analysis mask for all channels.
-    mask_path: !path [*base_dir, bbpower_input/mask_common_fsky14.fits]
+    mask_path: !path [*base_dir, bbpower_input/mask_common_wolzetal2024.fits]
 
     # Mode coupling matrices (including per-channel beams)
     # Expect placeholders: band1, band2 (mandatory)
     # (band1, band2) fill the upper triangular matrix (incl diagonal) of the
     # index matrix [[1, ..., n_map_sets], ..., [1, ..., n_map_sets]]
-    mcm_path: !path [*base_dir, "bbpower_input/mcm_fsky14_{band1}_{band2}.fits"]
+    mcm_path: !path [*base_dir, "bbpower_input/mcm_{band1}_{band2}.fits"]
 
     # Bandpower definition
-    bpw_edges: "/global/cfs/cdirs/sobs/sims/so_extended/bbpower_input/input_auxiliaries/bpw_edges_1536.txt"
+    bpw_edges: !path [*aux_dir, bpw_edges.txt]
     purify_B: True
     n_iter : 3
 
 BBPowerSummarizer:
     # Output SACC file(s) for cross-mapset spectra
     # Accept placeholder: sim_id (optional)
-    sacc_dir: !path [*base_dir, "cells_sims/gaussian/Alens0.3/NOMINAL_4YR/fsky14/{sim_id:04d}"]
+    sacc_dir: !path [*base_dir, "cells_sims/gaussian/Alens1/NOMINAL_5YR/wolzetal2024/{sim_id:04d}"]
     # Expect placeholder: typ (mandatory), sim_id (optional)
     sacc_format: "cells_{typ}.fits"
 
@@ -75,12 +75,12 @@ BBPowerSummarizer:
     # Compute null spectra?
     do_null: False
     # Compute noise spectra?
-    do_noise: True
+    do_noise: False
     # Compute total coadded spectra?
-    do_coadded_total: True
+    do_coadded_total: False
 
     # Covariance types
     nulls_covar_type: "diagonal"
     nulls_covar_diag_order: 0
     data_covar_type: "block_diagonal"
-    data_covar_diag_order: 3  # 0
+    data_covar_diag_order: 0  # 3

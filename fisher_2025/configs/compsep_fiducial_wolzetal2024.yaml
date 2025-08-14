@@ -1,0 +1,223 @@
+base_dir: &base_dir /pscratch/sd/k/kwolz/wolzetal2024
+aux_dir: &aux_dir /pscratch/sd/k/kwolz/wolzetal2024/bbpower_input
+chains_dir: &chains_dir !path [*base_dir, "mcmc_chains/gaussian/Alens1/NOMINAL_5YR/wolzetal2024/{sim_id:04d}/fiducial_model_noff0"]
+cells_dir: &cells_dir !path [*base_dir, "cells_sims/gaussian/Alens1/NOMINAL_5YR/wolzetal2024"]
+
+global:
+    nside: 512
+    compute_dell: True
+
+    # Number of simulations to run (ignored if empty)
+    sim_ids: 0,49
+
+    # Path where copy of config file will be stored
+    config_copy: !path [*chains_dir, config_copy.yaml]
+    
+    # These are the different frequency channels. Keywords must coincide with
+    # the tracer names inside the sacc files.
+    map_sets:
+        band1:  # 27 GHz
+            beam_file: !path [*aux_dir, beams/beam_LF1.txt]
+            bandpass_file: !path [*aux_dir, bandpasses/bandpass_delta_LF1.dat]
+        band2:  # 39 GHz
+            beam_file: !path [*aux_dir, beams/beam_LF2.txt]
+            bandpass_file: !path [*aux_dir, bandpasses/bandpass_delta_LF2.dat]
+        band3:  # 93 GHz
+            beam_file: !path [*aux_dir, beams/beam_MF1.txt]
+            bandpass_file: !path [*aux_dir, bandpasses/bandpass_delta_MF1.dat]
+        band4:  # 145 GHz
+            beam_file: !path [*aux_dir, beams/beam_MF2.txt]
+            bandpass_file: !path [*aux_dir, bandpasses/bandpass_delta_MF2.dat]
+        band5:  # 225 GHz
+            beam_file: !path [*aux_dir, beams/beam_UHF1.txt]
+            bandpass_file: !path [*aux_dir, bandpasses/bandpass_delta_UHF1.dat]
+        band6:  # 280 GHz
+            beam_file: !path [*aux_dir, beams/beam_UHF2.txt]
+            bandpass_file: !path [*aux_dir, bandpasses/bandpass_delta_UHF2.dat]
+    
+    # Input data or sims
+    data:
+        # Path to sacc file with cross-split power spectra
+        cells_coadded: !path [*cells_dir, "{sim_id:04d}/cells_coadded.fits"]
+        # Path to sacc file with cross-split power spectrum covariance
+        cells_coadded_cov: !path [*cells_dir, "0000/cells_coadded_noff0.fits"]
+        # Path to sacc file with best-fit power spectra
+        cells_best_fit: !path [*chains_dir, cells_model.fits]
+
+        # Path to sacc file with noise power spectra
+        cells_noise: null
+        # Path to sacc file with null-test power spectra
+        cells_null: null
+        # Path to sacc file with fiducial power spectra
+        cells_fiducial: null
+        # Path to sacc file with auto- and cross-bundle power spectra
+        cells_coadded_total: null
+
+BBCompSep:
+    output_dir: *chains_dir
+    # Sampler type (choose 'emcee', 'polychord', 'fisher', 'single_point' or 
+    # 'timing')
+    sampler: emcee
+    predict_linearized: False
+    predict_to_sacc: True
+    # If you chose polychord:
+    nlive: 50
+    nrepeat: 50
+    # If you chose emcee:
+    nwalkers: 24
+    n_iters: 4000
+    # Resume sampling from earlier runs
+    resume: False
+    # Likelihood type (choose 'chi2' or 'h&l')
+    likelihood_type: chi2
+    # What is the starting point?
+    r_init: 1.e-3
+    # Which polarization channels do you want to include?
+    pol_channels: ['B']
+    # Scale cuts (will apply to all frequencies)
+    l_min: 30
+    l_max: 300
+
+    # CMB model
+    cmb_model:
+        # Template power spectrum. Should contained the lensed power spectra
+        # with r=0 and r=1 respectively.
+        cmb_templates:
+        - "/global/cfs/cdirs/sobs/sims/so_extended/bbpower_input/camb_dells/camb_lens_nobb.dat"
+        - "/global/cfs/cdirs/sobs/sims/so_extended/bbpower_input/camb_dells/camb_lens_r1.dat"
+
+        # Free parameters
+        params:
+            # tensor-to-scalar ratio
+            # See below for the meaning of the different elements in the list.
+            #r_tensor: ['r_tensor', 'fixed', [0.]]
+            r_tensor: ['r_tensor', 'tophat', [-0.1, 0., 0.1]]
+            # Lensing amplitude
+            #A_lens: ['A_lens', 'fixed', [0.3]]
+            A_lens: ['A_lens', 'tophat', [0., 1., 2.]]
+
+    # Foreground model
+    fg_model:
+        # Include moment parameters?
+        use_moments: False
+        moments_lmax: 300
+
+        # Add one section per component. They should be called `component_X`,
+        # starting with X=1
+        component_1:
+            # Name for this component
+            name: Dust
+            # Type of SED. Should be one of the classes stored in fgbuster.components
+            # https://github.com/fgbuster/fgbuster/blob/master/fgbuster/component_model.py
+            sed: Dust
+            # Type of power spectra for all possible polarization channel combinations.
+            # Any combinations not added here will be assumed to be zero.
+            # The names should be one of the classes in bbpower/fgcls.py
+            cl:
+                EE: ClPowerLaw
+                BB: ClPowerLaw
+            # Parameters of the SED
+            sed_parameters:
+                # The key can be anything you want, but each parameter in the model
+                # must have a different name.
+                # The first item in the list is the name of the parameter used by fgbuster
+                # The second item is the type of prior. The last item are the numbers
+                # necessary to define the prior. They should be:
+                #  - Gaussian: [mean,sigma]
+                #  - tophat: [lower edge, start value, upper edge]
+                #  - fixed: [parameter value]
+                # nu0-type parameters can only be fixed.
+                beta_d: ['beta_d', 'tophat', [1.4, 1.6, 1.7]] # 1.625
+                #beta_d: ['beta_d', 'Gaussian', [1.6, 0.1]] # 1.625
+                temp_d: ['temp', 'fixed', [19.6]]
+                nu0_d: ['nu0', 'fixed', [353.]]
+            cl_parameters:
+                # Same for power spectrum parameters
+                # (broken down by polarization channel combinations)
+                EE:
+                   amp_d_ee: ['amp', 'tophat', [40., 56., 80.]]
+                   alpha_d_ee: ['alpha', 'tophat', [-1., -0.32, 0.]]
+                   l0_d_ee: ['ell0', 'fixed', [80.]]
+                BB:
+                   #amp_d_bb: ['amp', 'fixed', [30.]] # 30.8
+                   amp_d_bb: ['amp', 'tophat', [0, 30., 60]] # 30.8
+                   #alpha_d_bb: ['alpha', 'fixed', [-0.56]]
+                   alpha_d_bb: ['alpha', 'tophat', [-1.2, -0.6, 0.]] # -0.56
+                   l0_d_bb: ['ell0', 'fixed', [80.]]
+            moments:
+                gamma_d_beta : ['gamma_beta', 'tophat', [-3.5, -3, -2.5]]
+                amp_d_beta : ['amp_beta', 'tophat', [-5., 1., 15.]]
+            # If this component should be correlated with any other, list them here
+            cross:
+                # In this case the list should contain:
+                # [component name, prior type, prior parameters]
+                #epsilon_ds: ['component_2', 'fixed', [0.]]
+                epsilon_ds: ['component_2', 'tophat', [-1., 0., 1.]]
+
+        component_2:
+            name: Synchrotron
+            sed: Synchrotron
+            cl:
+                EE: ClPowerLaw
+                BB: ClPowerLaw
+            sed_parameters:
+                beta_s: ['beta_pl', 'Gaussian', [-3., 0.3]] # 3.11
+                nu0_s: ['nu0', 'fixed', [23.]]
+            cl_parameters:
+                EE:
+                    amp_s_ee: ['amp', 'tophat', [0., 9., 20.]]
+                    alpha_s_ee: ['alpha', 'tophat', [-1., -0.7, 0.]]
+                    l0_s_ee: ['ell0', 'fixed', [80.]]
+                BB:
+                    #amp_s_bb: ['amp', 'fixed', [0.]] # 4.1
+                    amp_s_bb: ['amp', 'tophat', [0., 1., 5.]] # 4.1
+                    #alpha_s_bb: ['alpha', 'fixed', [-0.8]]
+                    alpha_s_bb: ['alpha', 'tophat', [-2.5, -0.75, 0.]] # -0.80
+                    l0_s_bb: ['ell0', 'fixed', [80.]]
+            moments:
+                # Define gammas for varying spectral indices of components
+                gamma_s_beta : ['gamma_beta', 'tophat', [-3.5, -3, -2.5]]
+                amp_s_beta : ['amp_beta', 'tophat', [-5., 1., 5.]]
+
+BBPlotter:
+    # MCMC chain file
+    chain_file: !path [*chains_dir, emcee.npz]
+    # chi2 npz file
+    chi2_file: !path [*chains_dir, chi2.npz]
+
+    # Output directory for plots
+    plot_dir: !path [*chains_dir, plots]
+    # HTML page with plots
+    plots_page: !path [*chains_dir, plots_page.html]
+
+    # Which polarization channels to plot
+    pol_channels: ["B"]
+    # Maximum and minimum ell between which things will be plotted
+    lmin_plot: 30
+    lmax_plot: 300
+    # Add total coadds to C_ell plots?
+    plot_cells_coadded_total: False
+    # Add noise spectra to C_ell plots?
+    plot_cells_noise: False
+    # Plot null tests?
+    plot_cells_null: False
+    # Plot likelihood?
+    plot_likelihood: True
+    # List of parameters to plot
+    params_plot: [r_tensor, A_lens, epsilon_ds, beta_d, amp_d_bb, alpha_d_bb, beta_s, amp_s_bb, alpha_s_bb]
+
+    # "Truth" parameter values for plotting purposes
+    truth:
+        A_lens: 1.0
+        r_tensor: 0.
+        beta_d: 1.54
+        epsilon_ds: 0.
+        alpha_d_bb: -0.16
+        amp_d_bb: 28.
+        beta_s: -3.
+        alpha_s_bb: -0.93
+        amp_s_bb: 1.6
+        gamma_d_beta: null
+        amp_d_beta: null
+        gamma_s_beta: null
+        amp_s_beta: null

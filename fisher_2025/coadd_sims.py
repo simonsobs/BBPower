@@ -13,6 +13,7 @@ Alens = 0.3
 plot_dir = "/global/homes/k/kwolz/bbdev/BBPower/fisher_2025/plots"
 output_dir = "/global/cfs/cdirs/sobs/sims/fisher_2025"
 mask_common = "/global/cfs/cdirs/sobs/sims/so_extended/masks/masks_megatop/masks_baseline_{survey}/common_analysis_mask.fits"  # noqa
+timeline = "NOMINAL_4YR"
 
 noise_dir = "/global/cfs/cdirs/sobs/sims/so_extended/noise_sims/sat_noise_splits/{sat_noise}/pessimistic/s{id_sim:04d}/noise_SAT_f{noise_freq}.{sat_noise}.pessimistic.{survey}{id_sim:04d}.splt{id_bundle}.fits"  # noqa
 noise_levels = {"030": "goal", "040": "goal", "090": "goal", "150": "goal", "230": "baseline", "290": "baseline"}  # noqa
@@ -42,20 +43,28 @@ sat_years = {
     },
     # Suzanne's timeline (2025-2034):
     # see https://simonsobs.slack.com/archives/C096FGJ3VCG/p1753457851673079
-    "target": {
+    "12SAT_10YR": {
         "030": 2,  # 10 for 1 more LAT year from 2029 through 2034
-        "040": 2,  # 10 for 1 more LAT year from 2029 through 203
+        "040": 2,  # 10 for 1 more LAT year from 2029 through 2034
         "090": 59.33,
         "150": 59.33,
         "230": 21,
         "290": 21,
+    },
+    "NOMINAL_4YR": {
+        "030": 1.5,
+        "040": 1.5,
+        "090": 11.33,
+        "150": 11.33,
+        "230": 3,
+        "290": 3,
     }
 }
 
 # To get the factor to multiply Reijo's sims with, do:
 # sqrt(sat_years_so_extended/sat_years_target)
 rescaling = {
-    freq: np.sqrt(sat_years["so_extended"][freq]/sat_years["target"][freq])
+    freq: np.sqrt(sat_years["so_extended"][freq]/sat_years["NOMINAL_4YR"][freq])
     for freq in freqs
 }
 
@@ -162,7 +171,7 @@ for id_sim, survey in local_mpi_list:
         # null sky pixels outside patch
         coadd[:, 1:, :] *= binary_masks[survey][None, None, :]
 
-        dirname = f"{output_dir}/coadded_sims/gaussian/Alens{Alens}/{survey}/{id_sim:04d}"  # noqa
+        dirname = f"{output_dir}/coadded_sims/gaussian/Alens{Alens}/{timeline}/{survey}/{id_sim:04d}"  # noqa
         fname = f"SO_SAT_obs_map_split_{id_bundle}of4.fits"
 
         if id_sim == 0 and id_bundle == 1:
