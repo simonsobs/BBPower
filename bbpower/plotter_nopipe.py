@@ -41,6 +41,10 @@ labels_dict = {
     'amp_s_bb': '$A_s^{BB}$',
     'alpha_s_ee': '$\\alpha_s^{EE}$',
     'amp_s_ee': '$A_s^{EE}$',
+    'amp_s_beta': '$B_s$',
+    'amp_d_beta': '$B_d$',
+    'gamma_d_beta': '$\\gamma_d',
+    'gamma_s_beta': '$\\gamma_s$'
 }
 
 
