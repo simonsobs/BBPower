@@ -21,6 +21,7 @@ bbpower_config=${basedir}/config_glamdring.yml
 echo "Launching pipeline at $(date)"
 
 mpirun -n 10 \
+
 python -u ${bbpower_dir}/bbpower/compsep_nopipe.py --config $bbpower_config
 
 mpirun -n 10 \

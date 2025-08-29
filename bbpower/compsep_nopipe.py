@@ -32,9 +32,9 @@ class BBCompSep(object):
 
     # Attributes:
     # 
-    #   config: DICT - contains the info from the configuration file taht is stored within "global" or "BBCompSep"
-    #   config_fname: ???
-    #   use_handl: BOOL - true if we are using handl
+    #   config: configuration file
+    #   config_fname: configuration file's file name. 
+    #   use_handl: true if we are using HL likelyhood
     #   s: saac data of cross-split power spectra (i.e. the data we are analysing) with only the desired frequency channels
     #   s_cov: saac data of file with power spectrum covariance with only the desired frequency channels and desired polarization correlations within the range [l_min,l_max]
     #   s_fid: if use_handl is true, this is the saac data of the fiducial power spectra  and desired polarization correlations within the range [l_min,l_max]
@@ -49,8 +49,8 @@ class BBCompSep(object):
     #   bpss: list of Bypasses object - contains info regarding bandpasses for each filter that we observed with
     #   ell_b: list of ell that have been sampled
     #   bpw_l:
-    #   n_ell: the ell values (>=2) that we have data for
-    #   n_bpws: the ell values that we are actually sampling for
+    #   n_ell: 
+    #   n_bpws: 
     #   dl2cl: array of conversion factors to convert from dl to cl for each ell value in npw_l
     #   vector_indices - a nmap x nmap symetric matrix with elements in the upper triangle labelled in ascending order, first by row then column:
     #       e.g. if nmap = 4, upper triangle is labelled:
@@ -63,21 +63,23 @@ class BBCompSep(object):
     #                [  1,  4,  5,  6],
     #                [  2,  5,  7,  8],
     #                [  3,  6,  8,  9] ]
-    #   bbdata: 3dmatrix containing datapoints. First index is arranged in order of ell. Second index is arranged by frequency1 and then polarization1
-    #           (e.g. if we had two frequency bands b1 and b2 and two polarizations E and B, the columns are b1E b1B b2E b2B) and then thrid index is 
-    #           arranged by freq2 and then polarization2. 
+    #   bbdata: 3dmatrix containing angular power spectra coefficients, calculated between maps map1 and map2 at multipole ell. 
+    #       The first index of the matrix represents the ell being sampled
+    #       The second represents map1 (with maps ordered by frequency, and maps with the same frequency ordered by polarization)
+    #       The third index represents map2 (with maps ordered by frequency and maps with the same frequency orered by polarization)
     #   bbnoise: only defined if use_handl = true. 3d matrix containing noise data, arranged in the same order as bbdata
-    #   bbfiducial: only defined if use_handl = true. 3d matrix containing fiducial values, arranged in the same order as bbdata
+    #   bbfiducial: only defined if use_handl = true. ???
     #   bbcovar: the covariance matrix
     #   invcov: the inverse of the covariance matrix
     #   cmb_tens: array - contains the cmb_tens template
-    #       indexes correspond to [polarization1][polarization2][ell] (e.g. if B is the first polarization mode, cmb_tens[0][0] lists the template's value for each ell that we consider, in order)
+    #       indexes correspond to [polarization1][polarization2][ell] (e.g. if B is the first polarization mode, cmb_tens[0][0] lists the template's value for each ell)
     #   cmb_lens: array - contains the cmb_lens template, in the same format as cmb_tens
     #   cmb_scal: array - contains the cmb_scal template, in the same format as cmb_tens
-    #
+    #   Cfl_sqrt:
+    #   observed_cls:
     #   fgmodel: a FGModel object (class definition in fg_model.py) initialised with self.config
     #   params: a ParameterManager object (class definition in param_manager.py) initialised with self.config
-    #
+    #   output_dir: the output directory (from the config file)
 
     def __init__(self, args):
         """
@@ -737,8 +739,9 @@ class BBCompSep(object):
     def lnprob(self, par):
         """
         Likelihood with priors.
+        Note that self.get_log_jeffreys is ignored if we select standard (non-Jeffreys) priors.
         """
-        prior = self.params.lnprior(self.get_jeffreys_numerical, par)
+        prior = self.params.lnprior(self.get_log_jeffreys, par)
         if not np.isfinite(prior):
             return -np.inf
 
@@ -1025,7 +1028,7 @@ class BBCompSep(object):
 
 # Calculates the Jeffreys prior using numerical derivatives
 
-    def get_jeffreys_numerical(self, par_names, par):
+    def get_log_jeffreys(self, par_names, par):
         # Calculates the jeffreys prior numerically, assuming a gaussian likelyhood
         #
         # input:
@@ -1035,7 +1038,12 @@ class BBCompSep(object):
         # output: 
         #   a float indicating the value of the jeffrey's prior
         params = dict(zip(self.params.p_free_names,par)) | dict(self.params.p_fixed)
-        return np.sqrt(np.linalg.det(self.get_fisher_numerical(par_names, params)))
+        fisher = self.get_fisher_numerical(par_names, params)
+        slogdet = np.linalg.slogdet(fisher) #Tuple: (sign of det F, log( |detF| ) )
+        if slogdet[0] == 1: # Checks that detF>0
+            return 0.5 * np.linalg.slogdet(fisher)[1] # Caclulates log(sqrt(detF))
+        else: 
+            return -np.inf
 
     def get_fisher_numerical(self, par_names, params):
         # Calculates the Fisher matrix for the parameters listed in par_names, ignoring the other parameters

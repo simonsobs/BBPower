@@ -114,8 +114,8 @@ BBCompSep:
     # Foreground model
     fg_model:
         # Include moment parameters?
-        use_moments: False
-        moments_lmax: 300
+        use_moments: True
+        moments_lmax: 192
 
         # Add one section per component. They should be called `component_X`,
         # starting with X=1
