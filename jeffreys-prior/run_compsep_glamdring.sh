@@ -16,7 +16,7 @@ basedir=/mnt/users/kwolz/bbdev/BBPower/jeffreys-prior  ## YOUR RUNNING DIRECTORY
 bbpower_dir=/mnt/users/kwolz/bbdev/BBPower  ## PATH TO YOUR LOCAL BBPOWER
 cd $basedir
 
-bbpower_config=${basedir}/config_glamdring.yml
+bbpower_config=${basedir}/config_jeffreys.yml
 
 echo "Launching pipeline at $(date)"
 
