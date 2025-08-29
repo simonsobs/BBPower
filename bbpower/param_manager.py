@@ -1,16 +1,16 @@
 import numpy as np
 
-class ParameterManager(object):
+class ParameterManager(object): 
     # Class containing details of the model's parameters. 
     #
     # Init inputs:
-    #   config: <TODO: not sure what this is>
+    #   config: the configuration file
     #
     # Attributes:
     #
     #   p_free_names: List of free parameter names
     #
-    #   p_free_priors: List of free parameters priors, [p1,p2, ... ] with each pi in one of the following forms:
+    #   p_free_priors: List of free parameters priors [p_1,p_2,...] (in the same order as p_free_names). Each prior, p_i is a list taking one of the following forms:
     #
     #       [<LABEL>, "fixed", [<VAL>]]
     #               for fixed params, where VAL is the value the param is fixed as
@@ -21,29 +21,37 @@ class ParameterManager(object):
     #       [<LABEL>, "Gaussian", [<MEAN>, <STDEV>]]
     #               for params with gaussian priors where MEAN is the gaussian's mean and STDEV the standard deviation
     #
+    #       [<LABEL>, "Jeffreys",[<VAL>]]
+    #               for params with Jeffreys priors, with starting value VAL
+    #
     #   p_fixed: List of (NAME, VAL) pairs of all fixed parameters
     #
-    #   p0: numpy array of starting values of the free parameters
+    #   p0: numpy array containing the starting values of the free parameters (in the same order as p_free_names)
+
 
     def _add_parameter(self, p_name, p):
         # Adds a (single) new parameter to the current class
         #
         # Input:
         #
-        #   p_name: parameter's name
+        #   p_name: new parameter's name
         #
-        #   p: list, taking one of the following forms:
+        #   p: the new parameter's prior, taking one of the following forms:
         #
         #       [<LABEL>, "fixed", [<VAL>]]
         #               for fixed params, where VAL is the value the param is fixed as
         #
-        #       [<LABEL>, "tophat", [<MIN>, <FIDUCIAL_VAL>, <MAX>]] 
-        #               for params with tophat priorswhere MIN and MAX are the min and max values in the tophat prior and FIDUCIAL_VAL the fiducial value
+        #       [<LABEL>, "tophat", [<MIN>, <VAL>, <MAX>]] 
+        #               for params with tophat priorswhere MIN and MAX are the min and max values in the tophat prior and VAL is the starting value
         #
         #       [<LABEL>, "Gaussian", [<MEAN>, <STDEV>]]
-        #               for params with gaussian priors where MEAN is the gaussian's mean and STDEV the standard deviation
+        #               for params with gaussian priors where MEAN is the gaussian's mean (and the starting value) and STDEV the standard deviation
         #
-        # No output
+        #       [<LABEL>, "Jeffreys",[<VAL>]]
+        #               for params with Jeffreys priors, with starting value VAL
+        #
+        # Output:
+        #   None
 
         # If fixed parameter, just add its name and value
         if p[1] == 'fixed':
@@ -84,8 +92,8 @@ class ParameterManager(object):
         #       [<LABEL>, "Gaussian", [<MEAN>, <STDEV>]]
         #               for params with gaussian priors where MEAN is the gaussian's mean and STDEV the standard deviation
         #
-        # No output
-        
+        # Output:
+        #   None
         for p_name in sorted(params.keys()):
             p = params[p_name]
             self._add_parameter(p_name, p)
@@ -106,7 +114,7 @@ class ParameterManager(object):
         # Initialises the atributes of the current object from the config file. 
         #
         # Input:
-        #   configuration file
+        #   config: configuration file
         # 
         # Output:
         #   None
@@ -168,14 +176,15 @@ class ParameterManager(object):
         params.update(dict(zip(self.p_free_names, par)))
         return params
 
-    def lnprior(self, get_jeffreys, par):
+    def lnprior(self, get_log_jeffreys, par):
         # Evaluates the log prior
         #
         # Input: 
         #   par: list of values of the free parameters (where we are evaluating the prior at)
+        #       (these values should be ordered in the same order as p_free_names and p_free_priors)
         #
         # Output: 
-        #   lnp: the log of the prior, evaluated when the free parameters take the values given in par
+        #   lnp: the log of the prior pdf, evaluated at the position in parameter space when the free parameters take the values given in par
         #
         lnp = 0
         jeffreys_params = []
@@ -189,5 +198,5 @@ class ParameterManager(object):
                     return -np.inf
                 
         if jeffreys_params:
-            lnp += np.log(get_jeffreys(jeffreys_params, par))
+            lnp += get_log_jeffreys(jeffreys_params, par)
         return lnp
