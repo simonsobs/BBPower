@@ -269,7 +269,7 @@ if plot_triangles == True:
         # Try to load the emcee files. If a file is missing, skips the current simulation and moves on to the next
         chains = {
             "Jeffreys Prior": f"{data_path_1}/{sim_id:04}/emcee.npz",
-            "Non-Jeffreys Prior": f"{data_path_2}/{sim_id+1:04}/emcee.npz"
+            "Non-Jeffreys Prior": f"{data_path_2}/{sim_id:04}/emcee.npz"
         }
         missing_file = False
         for key in chains.keys():
