@@ -162,7 +162,7 @@ class BBPlotter(PipelineStage):
                 plt.xlabel('$\\ell$',fontsize=15)
                 plt.ylabel('$C_\\ell/\\sigma_\\ell$',fontsize=15)
                 plt.legend()
-                plt.savefig(fname,bbox_index='tight')
+                plt.savefig(fname,bbox_inches='tight')
                 plt.close()
                 lst+=dtg.li(dtg.a(title,href=fname))
 

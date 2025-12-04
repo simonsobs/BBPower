@@ -38,8 +38,11 @@ class BBCompSep(PipelineStage):
         self.fg_model = FGModel(self.config)
         self.params = ParameterManager(self.config)
         if self.config.get("diff"):
-            print('Running hybrid')            
-            self.hybridparams = np.load(self.config['resid_seds'])
+            print('Running hybrid')
+            self.hybridparams = np.load(
+                self.config['resid_seds'],
+                allow_pickle=True
+            ).item()
             hyb_params = self.hybridparams['params_cent']
             hyb_sigma = self.hybridparams['params_sigma']
             pnames = np.array(self.params.p_free_names)
@@ -49,6 +52,10 @@ class BBCompSep(PipelineStage):
             self.params.p_free_priors[ind_bs][2] = [hyb_params[0], hyb_sigma[0]]
             # Beta_d: [centre, sigma]
             self.params.p_free_priors[ind_bd][2] = [hyb_params[1], hyb_sigma[1]]
+            if len(pnames) == 3:  # TODO: do nicer
+                ind_td = int(np.where(pnames == 'temp_d')[0])
+                # Temp_d: [centre, sigma]
+                self.params.p_free_priors[ind_td][2] = [hyb_params[2], hyb_sigma[2]]
         if self.use_handl:
             self.prepare_h_and_l()
         return
@@ -173,7 +180,7 @@ class BBCompSep(PipelineStage):
         for i_t, tn in enumerate(tr_names):
             t = self.s.tracers[tn]
             nu = t.nu
-            dnu = np.zeros_like(nu);
+            dnu = np.zeros_like(nu)
             dnu[1:-1] = 0.5 * (nu[2:] - nu[:-2])
             dnu[0] = nu[1] - nu[0]
             dnu[-1] = nu[-1] - nu[-2]
@@ -236,7 +243,10 @@ class BBCompSep(PipelineStage):
         self.bbdata = self.vector_to_matrix(v2d) #(nbpw, nf, nf)
         if self.config.get("diff"):
             from scipy.linalg import eig, inv, pinv
-            self.hybridparams = np.load(self.config['resid_seds'])
+            self.hybridparams = np.load(
+                self.config['resid_seds'],
+                allow_pickle=True
+            ).item()
             Qmat = self.hybridparams['Q']
             eval, evec = eig(Qmat)
             mask = eval > 0.1 #take away rows equivalent to eigenvalue=0
@@ -274,7 +284,10 @@ class BBCompSep(PipelineStage):
             self.bbfiducial = self.vector_to_matrix(v2d_fid)
             if self.config.get("diff"):
                 from scipy.linalg import eig, inv, pinv
-                self.hybridparams = np.load(self.config['resid_seds'])
+                self.hybridparams = np.load(
+                    self.config['resid_seds'], 
+                    allow_pickle=True
+                ).item()
                 Qmat = self.hybridparams['Q']
                 eval, evec = eig(Qmat)
                 mask = eval > 0.1 #take away rows equivalent to eigenvalue=0
@@ -326,7 +339,7 @@ class BBCompSep(PipelineStage):
             
             if self.config.get("diff"):
                 def sed(nu):
-                    return comp['sed'].diff(nu, *sed_params) 
+                    return comp['sed'].diff(nu, *sed_params) # TODO: check derivative it's a list
             else:
                 def sed(nu):
                     return comp['sed'].eval(nu, *sed_params)
@@ -623,7 +636,7 @@ class BBCompSep(PipelineStage):
         Likelihood with priors. 
         """
         prior = self.params.lnprior(par)
-        if not np.isfinite(prior):
+        if not np.any(np.isfinite(prior)):
             return -np.inf
         return prior + self.lnlike(par)
 
@@ -655,24 +668,29 @@ class BBCompSep(PipelineStage):
         ndim = len(self.params.p0)
         found_file = os.path.isfile(fname_temp)
 
-        if not found_file:
-            backend.reset(nwalkers,ndim)
-            #p0 = self.minimizer()
-            #pos = [p0 + 1.e-3*np.random.randn(ndim) for i in range(nwalkers)]
-            #nsteps_use = n_iters
-            pos = [self.params.p0 + 1.e-3*np.random.randn(ndim)
-                   for i in range(nwalkers)]
-            nsteps_use = n_iters
-        else:
+        try:
+            nchain = len(backend.get_chain())
+        except AttributeError:
+            found_file = False
+
+        if found_file and self.config['resume']:
             print("Restarting from previous run")
             pos = None
-            nsteps_use = max(n_iters-len(backend.get_chain()), 0)
+            nsteps_use = max(n_iters-nchain, 0)
+        else:
+            backend.reset(nwalkers, ndim)
+        
+        pos = [self.params.p0 + 1.e-3*np.random.randn(ndim)
+                for i in range(nwalkers)]
+        nsteps_use = n_iters
 
         import time
         start = time.time()
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, self.lnprob, backend=backend)
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, 
+                                        self.lnprob, 
+                                        backend=backend)
         if nsteps_use > 0:
-            sampler.run_mcmc(pos, nsteps_use, store=True, progress=True);
+            sampler.run_mcmc(pos, nsteps_use, store=True, progress=True)
         end = time.time()
         return sampler, end-start
 
@@ -795,7 +813,9 @@ class BBCompSep(PipelineStage):
         if self.config.get('sampler')=='emcee':
             sampler, timing = self.emcee_sampler()
             np.savez(self.get_output('param_chains'),
-                     names=self.params.p_free_names, time=timing)
+                     chain=sampler.chain,
+                     names=self.params.p_free_names, 
+                     time=timing)
             print("Finished sampling: ", timing)
         elif self.config.get('sampler')=='fisher':
             fisher = self.fisher()
