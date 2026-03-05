@@ -1,5 +1,11 @@
 import fgbuster.component_model as fgc
-import bbpower.fgcls as fgl
+import sys
+import os
+sys.path.append(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), '.'))
+)
+
+import fgcls as fgl  # noqa
 
 
 class FGModel:
@@ -46,7 +52,7 @@ class FGModel:
                                        "is not a valid component" +
                                        "to correlate %s with" % key)
                     if par[0] == key:
-                        raise KeyError("%s is cross correlated with itself." % par[0])
+                        raise KeyError("%s is cross correlated with itself." % par[0])  # noqa
                     comp['names_x_dict'][par[0]] = pn
 
             # Loop through SED parameters.
