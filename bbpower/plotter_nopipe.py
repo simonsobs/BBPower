@@ -9,6 +9,8 @@ import sacc
 import os
 import yaml
 import time
+from getdist import MCSamples
+from getdist import plots as gplots
 from itertools import combinations_with_replacement as cwr
 
 import sys
@@ -334,9 +336,6 @@ class BBPlotter(object):
     def add_contours(self):
         """
         """
-        from getdist import MCSamples
-        from getdist import plots as gplots
-
         with self.doc:
             dtg.h2("Likelihood", id='like')
             lst = dtg.ul()
