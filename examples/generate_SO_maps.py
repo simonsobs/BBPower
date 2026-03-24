@@ -32,12 +32,9 @@ cldbb *= dl2cl
 clcee *= dl2cl
 clcbb *= dl2cl
 cl0 = 0*clsee
-_, Qs, Us = hp.synfast([cl0, clsee, clsbb, cl0, cl0, cl0],
-                       o.nside, verbose=False, new=True)
-_, Qd, Ud = hp.synfast([cl0, cldee, cldbb, cl0, cl0, cl0],
-                       o.nside, verbose=False, new=True)
-_, Qc, Uc = hp.synfast([cl0, clcee, clcbb, cl0, cl0, cl0],
-                       o.nside, verbose=False, new=True)
+_, Qs, Us = hp.synfast([cl0, clsee, clsbb, cl0, cl0, cl0], o.nside, new=True)
+_, Qd, Ud = hp.synfast([cl0, cldee, cldbb, cl0, cl0, cl0], o.nside, new=True)
+_, Qc, Uc = hp.synfast([cl0, clcee, clcbb, cl0, cl0, cl0], o.nside, new=True)
 map_comp = np.array([[Qc, Uc],
                      [Qs, Us],
                      [Qd, Ud]])
@@ -61,7 +58,7 @@ map_noise = np.zeros([nsplits, nfreqs, 2, npix])
 for i_s in range(nsplits):
     for i_f in range(nfreqs):
         _, mpq, mpu = hp.synfast([cl0, nell[i_f], nell[i_f], cl0, cl0, cl0],
-                                 o.nside, verbose=False, new=True)
+                                 o.nside, new=True)
         map_noise[i_s, i_f, 0, :] = mpq * np.sqrt(nsplits)
         map_noise[i_s, i_f, 1, :] = mpu * np.sqrt(nsplits)
 
@@ -70,8 +67,7 @@ s_fwhm = nc.Simons_Observatory_V3_SA_beam_FWHM()
 for i_f, s in enumerate(s_fwhm):
     fwhm = s * np.pi/180./60.
     for i_p in [0, 1]:
-        map_freq[i_f, i_p, :] = hp.smoothing(map_freq[i_f, i_p, :],
-                                             fwhm=fwhm, verbose=False)
+        map_freq[i_f, i_p, :] = hp.smoothing(map_freq[i_f, i_p, :], fwhm=fwhm)
 
 # Write output
 for s in range(nsplits):
