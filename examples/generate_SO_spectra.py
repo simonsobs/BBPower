@@ -6,6 +6,9 @@ import sys
 
 
 prefix_out = sys.argv[1]
+# Use forecast params from Wolz et al. (2302.04276)
+so_forecast = "--so_forecast" in sys.argv
+print("so_forecast:", so_forecast)
 
 # Bandpasses
 band_names = ['LF1', 'LF2', 'MF1', 'MF2', 'UHF1', 'UHF2']
@@ -40,14 +43,15 @@ dls_comp = np.zeros([3, 2, 3, 2, lmax+1])  # [ncomp,np,ncomp,np,nl]
  dls_comp[2, 0, 2, 0, :],
  dls_comp[2, 1, 2, 1, :],
  dls_comp[0, 0, 0, 0, :],
- dls_comp[0, 1, 0, 1, :]) = ut.get_component_spectra(lmax)
+ dls_comp[0, 1, 0, 1, :]) = ut.get_component_spectra(lmax,
+                                                     so_forecast)
 dls_comp *= dl2cl[None, None, None, None, :]
 
 # Convolve with windows
 bpw_comp = np.sum(dls_comp[:, :, :, :, None, :] * windows[None, None, None, None, :, :], axis=5)  # noqa
 
 # Convolve with bandpasses
-seds = ut. get_convolved_seds(band_names, bpss)
+seds = ut. get_convolved_seds(band_names, bpss, so_forecast)
 _, nfreqs = seds.shape
 
 # Component -> frequencies
