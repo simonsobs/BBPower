@@ -1,32 +1,53 @@
 import numpy as np
 import os
-from scipy.linalg import sqrtm
+import argparse
+import yaml
+import time
+import sacc  # noqa
+import sys
+sys.path.append(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), '.'))
+)
 
-from bbpipe import PipelineStage
-from .types import FitsFile, YamlFile, DirFile
-from .fg_model import FGModel
-from .param_manager import ParameterManager
-from .bandpasses import (Bandpass, rotate_cells, rotate_cells_mat,
-                         decorrelated_bpass)
-import sacc
+import mpi_utils as mpi  # noqa
+from fg_model import FGModel  # noqa
+from param_manager import ParameterManager  # noqa
+from bandpasses import (Bandpass, rotate_cells, rotate_cells_mat,  # noqa
+                        decorrelated_bpass)
 
 
-class BBCompSep(PipelineStage):
+def _yaml_loader(config):
+    """
+    Custom yaml loader to load the configuration file.
+    """
+    def path_constructor(loader, node):
+        return "/".join(loader.construct_sequence(node))
+    yaml.SafeLoader.add_constructor("!path", path_constructor)
+    with open(config, "r") as f:
+        return yaml.load(f, Loader=yaml.SafeLoader)
+
+
+class BBCompSep(object):
     """
     Component separation stage
     This stage does harmonic domain foreground cleaning (e.g. BICEP).
     The foreground model parameters are defined in the config.yml file.
     """
-    name = "BBCompSep"
-    inputs = [('cells_coadded', FitsFile),
-              ('cells_noise', FitsFile),
-              ('cells_fiducial', FitsFile),
-              ('cells_coadded_cov', FitsFile)]
-    outputs = [('output_dir', DirFile),
-               ('config_copy', YamlFile)]
-    config_options = {'likelihood_type': 'h&l', 'n_iters': 32,
-                      'nwalkers': 16, 'r_init': 1.e-3,
-                      'sampler': 'emcee', 'bands': 'all'}
+    def __init__(self, args):
+        """
+        Initialize from the command line arguments.
+
+        Parameters
+        ----------
+        args : str
+            Command line arguments.
+        """
+
+        # Load the configuration file
+        config = _yaml_loader(args.config)
+        self.config = config["global"] | config["BBCompSep"]
+        setattr(self, "config_fname", getattr(args, "config"))
+        setattr(self, "data", self.config["data"])
 
     def setup_compsep(self):
         """
@@ -46,7 +67,7 @@ class BBCompSep(PipelineStage):
         return self.config['fg_model'].get('moments_lmax', 384)
 
     def precompute_w3j(self):
-        from pyshtools.utils import Wigner3j  # noqa
+        from pyshtools.utils import Wigner3j
 
         lmax = self.get_moments_lmax()
         ells_w3j = np.arange(0, lmax)
@@ -90,10 +111,11 @@ class BBCompSep(PipelineStage):
 
     def _freq_pol_iterator(self):
         icl = -1
-        for b1 in range(self.nfreqs):
+        map_sets = list(self.config["map_sets"])
+        for b1 in range(len(map_sets)):
             for p1 in range(self.npol):
                 m1 = p1 + self.npol * b1
-                for b2 in range(b1, self.nfreqs):
+                for b2 in range(b1, len(map_sets)):
                     if b1 == b2:
                         p2_r = range(p1, self.npol)
                     else:
@@ -101,35 +123,45 @@ class BBCompSep(PipelineStage):
                     for p2 in p2_r:
                         m2 = p2 + self.npol * b2
                         icl += 1
-                        yield b1, b2, p1, p2, m1, m2, icl
+                        yield map_sets[b1], map_sets[b2], p1, p2, m1, m2, icl
 
     def parse_sacc_file(self):
         """
         Reads the data in the sacc file included the power spectra,
         bandpasses, and window functions.
         """
+        from copy import deepcopy
+
         # Decide if you're using H&L
         self.use_handl = self.config['likelihood_type'] == 'h&l'
 
         # Read data
-        self.s = sacc.Sacc.load_fits(self.get_input('cells_coadded'))
-        self.s_cov = sacc.Sacc.load_fits(self.get_input('cells_coadded_cov'))
-        tr_comb = self.s.get_tracer_combinations()
-        for tr1, tr2 in tr_comb:
-            ind1 = self.s.indices(data_type='cl_bb', tracers=(tr1, tr2))
-            ind2 = self.s_cov.indices(data_type='cl_bb', tracers=(tr1, tr2))
-            assert np.all(ind1 == ind2), "Covariance sacc ordering is wrong"
+        cells_coadded = self.data["cells_coadded"].format(sim_id=self.sim_id)
+        self.s = sacc.Sacc.load_fits(cells_coadded)
+        self.s_cov = sacc.Sacc.load_fits(self.data["cells_coadded_cov"])
         if self.use_handl:
-            s_fid = sacc.Sacc.load_fits(self.get_input('cells_fiducial'))
-            s_noi = sacc.Sacc.load_fits(self.get_input('cells_noise'))
+            s_fid = sacc.Sacc.load_fits(self.data["cells_fiducial"])
+            s_noi = sacc.Sacc.load_fits(self.data["cells_noise"])
+
+        # Keep only desired tracers
+        tr_names = list(self.config['map_sets'].keys())
+        tr_names_before = deepcopy(self.s.tracers)
+        for tr in tr_names_before:
+            if tr not in tr_names:
+                self.s.remove_tracers([tr])
+                self.s_cov.remove_tracers([tr])
+        tr_comb = self.s.get_tracer_combinations()
 
         # Keep only desired correlations
         self.pols = self.config['pol_channels']
-        corr_all = ['cl_ee', 'cl_eb', 'cl_be', 'cl_bb']
+        corr_all = ['cl_00', 'cl_0e', 'cl_0b', 'cl_e0', 'cl_b0',
+                    'cl_ee', 'cl_eb', 'cl_be', 'cl_bb']
         corr_keep = []
         for m1 in self.pols:
             for m2 in self.pols:
                 clname = 'cl_' + m1.lower() + m2.lower()
+                if "0" in clname:
+                    continue
                 corr_keep.append(clname)
         for c in corr_all:
             if c not in corr_keep:
@@ -150,10 +182,18 @@ class BBCompSep(PipelineStage):
             s_noi.remove_selection(ell__gt=self.config['l_max'])
             s_noi.remove_selection(ell__lt=self.config['l_min'])
 
-        if self.config['bands'] == 'all':
-            tr_names = sorted(list(self.s.tracers.keys()))
-        else:
-            tr_names = self.config['bands']
+        for tr1, tr2 in tr_comb:
+            ind1 = self.s.indices(data_type='cl_bb', tracers=(tr1, tr2))
+            ind2 = self.s_cov.indices(data_type='cl_bb', tracers=(tr1, tr2))
+            assert np.all(ind1 == ind2), "Covariance sacc ordering is wrong"
+            if self.use_handl:
+                ind3 = self.s_fid.indices(data_type='cl_bb',
+                                          tracers=(tr1, tr2))
+                ind4 = self.s_noi.indices(data_type='cl_bb',
+                                          tracers=(tr1, tr2))
+                assert np.all(ind1 == ind3), "Fiducial sacc ordering is wrong"
+                assert np.all(ind1 == ind4), "Noise sacc ordering is wrong"
+
         self.nfreqs = len(tr_names)
         self.npol = len(self.pols)
         self.nmaps = self.nfreqs * self.npol
@@ -188,9 +228,9 @@ class BBCompSep(PipelineStage):
         self.windows = np.zeros([self.ncross, self.n_bpws, self.n_ell])
 
         # Get power spectra and covariances
-        if self.config['bands'] == 'all':
-            if not (self.s_cov.covariance.covmat.shape[-1] == len(self.s.mean) == self.n_bpws * self.ncross):  # noqa: E501
-                raise ValueError("C_ell vector's size is wrong")
+        if not (self.s_cov.covariance.covmat.shape[-1] == len(self.s.mean)
+                == self.n_bpws * (self.nfreqs * (self.nfreqs + 1)) // 2 * self.npol**2):  # noqa
+            raise ValueError("C_ell vector's size is wrong")
 
         v2d = np.zeros([self.n_bpws, self.ncross])
         if self.use_handl:
@@ -198,18 +238,18 @@ class BBCompSep(PipelineStage):
             v2d_fid = np.zeros([self.n_bpws, self.ncross])
         cv2d = np.zeros([self.n_bpws, self.ncross, self.n_bpws, self.ncross])
 
-        self.vector_indices = self.vector_to_matrix(np.arange(self.ncross, dtype=int)).astype(int)  # noqa: E501
+        self.vector_indices = self.vector_to_matrix(
+            np.arange(self.ncross, dtype=int)
+        ).astype(int)
         self.indx = []
 
         # Parse into the right ordering
         itr1 = self._freq_pol_iterator()
         for b1, b2, p1, p2, m1, m2, ind_vec in itr1:
-            t1 = tr_names[b1]
-            t2 = tr_names[b2]
             pol1 = self.pols[p1].lower()
             pol2 = self.pols[p2].lower()
             cl_typ = f'cl_{pol1}{pol2}'
-            ind_a = self.s.indices(cl_typ, (t1, t2))
+            ind_a = self.s.indices(cl_typ, (b1, b2))
             if len(ind_a) != self.n_bpws:
                 raise ValueError("All power spectra need to be "
                                  "sampled at the same ells")
@@ -217,17 +257,15 @@ class BBCompSep(PipelineStage):
             self.windows[ind_vec, :, :] = w.weight[mask_w, :].T
             v2d[:, ind_vec] = np.array(self.s.mean[ind_a])
             if self.use_handl:
-                _, v2d_noi[:, ind_vec] = s_noi.get_ell_cl(cl_typ, t1, t2)
-                _, v2d_fid[:, ind_vec] = s_fid.get_ell_cl(cl_typ, t1, t2)
+                _, v2d_noi[:, ind_vec] = s_noi.get_ell_cl(cl_typ, b1, b2)
+                _, v2d_fid[:, ind_vec] = s_fid.get_ell_cl(cl_typ, b1, b2)
             itr2 = self._freq_pol_iterator()
-            for b1b, b2b, p1b, p2b, m1b, m2b, ind_vecb in itr2:
-                t1b = tr_names[b1b]
-                t2b = tr_names[b2b]
+            for b1b, b2b, p1b, p2b, _, _, ind_vecb in itr2:
                 pol1b = self.pols[p1b].lower()
                 pol2b = self.pols[p2b].lower()
                 cl_typb = f'cl_{pol1b}{pol2b}'
-                ind_b = self.s.indices(cl_typb, (t1b, t2b))
-                cv2d[:, ind_vec, :, ind_vecb] = self.s_cov.covariance.covmat[ind_a][:, ind_b]  # noqa: E501
+                ind_b = self.s.indices(cl_typb, (b1b, b2b))
+                cv2d[:, ind_vec, :, ind_vecb] = self.s_cov.covariance.covmat[ind_a][:, ind_b]  # noqa
 
         # Store data
         self.bbdata = self.vector_to_matrix(v2d)
@@ -238,6 +276,8 @@ class BBCompSep(PipelineStage):
                                      self.n_bpws * self.ncross])
         self.invcov = np.linalg.solve(self.bbcovar,
                                       np.identity(len(self.bbcovar)))
+        np.savez(self.output_dir + '/data_ell_cl_invcov.npz',
+                 ell=self.ell_b, cl=self.bbdata, invcov=self.invcov)
         return
 
     def load_cmb(self):
@@ -245,7 +285,8 @@ class BBCompSep(PipelineStage):
         Loads the CMB BB spectrum as defined in the config file.
         """
         cmb_lensingfile = np.loadtxt(
-            self.config['cmb_model']['cmb_templates'][0])
+            self.config['cmb_model']['cmb_templates'][0]
+        )
         cmb_bbfile = np.loadtxt(self.config['cmb_model']['cmb_templates'][1])
 
         self.cmb_ells = cmb_bbfile[:, 0]
@@ -270,6 +311,12 @@ class BBCompSep(PipelineStage):
         return
 
     def integrate_seds(self, params):
+        """
+        Integrated the SEDs of sky components and integrate them
+        over the given bandpasses. Output the relative scaling amplitudes
+        for cross correlations of different frequency channels, and the
+        corresponding polarization angle rotation matrices.
+        """
         single_sed = np.zeros([self.fg_model.n_components,
                                self.nfreqs])
         comp_scaling = np.zeros([self.fg_model.n_components,
@@ -311,7 +358,7 @@ class BBCompSep(PipelineStage):
 
         for i_c1, c_name1 in enumerate(self.fg_model.component_names):
             fg_scaling[i_c1, i_c1] = comp_scaling[i_c1]
-            for c_name2, epsname in self.fg_model.components[c_name1]['names_x_dict'].items():  # noqa: E501
+            for c_name2, epsname in self.fg_model.components[c_name1]['names_x_dict'].items():  # noqa
                 i_c2 = self.fg_model.component_order[c_name2]
                 eps = params[epsname]
                 fg_scaling[i_c1, i_c2] = eps * np.outer(single_sed[i_c1],
@@ -321,6 +368,9 @@ class BBCompSep(PipelineStage):
         return fg_scaling, np.array(rot_matrices)
 
     def evaluate_power_spectra(self, params):
+        """
+        Evaluates the power spectra for each component and each ell
+        """
         fg_pspectra = np.zeros([self.fg_model.n_components, self.npol,
                                 self.npol, self.n_ell])
 
@@ -342,8 +392,7 @@ class BBCompSep(PipelineStage):
 
     def model(self, params):
         """
-        Defines the total model and integrates over
-        the bandpasses and windows.
+        Defines the total model and integrates over bandpasses and windows.
         """
         # [npol,npol,nell]
         cmb_cell = (params['r_tensor'] * self.cmb_tens +
@@ -351,6 +400,7 @@ class BBCompSep(PipelineStage):
                     self.cmb_scal) * self.dl2cl
         # [nell,npol,npol]
         cmb_cell = np.transpose(cmb_cell, axes=[2, 0, 1])
+
         if self.config['cmb_model'].get('use_birefringence'):
             bi_angle = np.radians(params['birefringence'])
             c = np.cos(2*bi_angle)
@@ -358,13 +408,10 @@ class BBCompSep(PipelineStage):
             bmat = np.array([[c, s],
                              [-s, c]])
             cmb_cell = rotate_cells_mat(bmat, bmat, cmb_cell)
-        
         # [ncomp, ncomp, nfreq, nfreq], [ncomp, nfreq,[matrix]]
         fg_scaling, rot_m = self.integrate_seds(params)
         # [ncomp,npol,npol,nell]
         fg_cell = self.evaluate_power_spectra(params)
-
-        # Add all components scaled in frequency (and HWP-rotated if needed)
         # [nfreq, nfreq, nell, npol, npol]
         cls_array_fg = np.zeros([self.nfreqs, self.nfreqs,
                                  self.n_ell, self.npol, self.npol])
@@ -454,10 +501,10 @@ class BBCompSep(PipelineStage):
                         cls += 0.5 * (fg_scaling_d2[f1, c1] *
                                       (fg_scaling[c1, c1, f2, f2])**0.5 +
                                       fg_scaling_d2[f2, c1] *
-                                      (fg_scaling[c1, c1, f1, f1])**0.5) * cls_02[c1]  # noqa: E501
+                                      (fg_scaling[c1, c1, f1, f1])**0.5) * cls_02[c1]  # noqa
                     cls_array_fg[f1, f2] += cls
 
-        # Window convolution
+        # Bandpower window convolution
         cls_array_list = np.zeros([self.n_bpws, self.nfreqs,
                                    self.npol, self.nfreqs,
                                    self.npol])
@@ -478,10 +525,10 @@ class BBCompSep(PipelineStage):
         # Polarization angle rotation
         for f1 in range(self.nfreqs):
             for f2 in range(self.nfreqs):
-                cls_array_list[:, f1, :, f2, :] = rotate_cells(self.bpss[f2],
-                                                               self.bpss[f1],
-                                                               cls_array_list[:, f1, :, f2, :],  # noqa: E501
-                                                               params)
+                cls_array_list[:, f1, :, f2, :] = rotate_cells(
+                    self.bpss[f2], self.bpss[f1],
+                    cls_array_list[:, f1, :, f2, :], params
+                )
 
         return cls_array_list.reshape([self.n_bpws, self.nmaps, self.nmaps])
 
@@ -548,6 +595,10 @@ class BBCompSep(PipelineStage):
         return self.matrix_to_vector(self.bbdata - model_cls).flatten()
 
     def prepare_h_and_l(self):
+        """
+        Prepare the HL likelihood.
+        """
+        from scipy.linalg import sqrtm  # noqa
         fiducial_noise = self.bbfiducial + self.bbnoise
         self.Cfl_sqrt = np.array([sqrtm(f) for f in fiducial_noise])
         self.observed_cls = self.bbdata + self.bbnoise
@@ -557,7 +608,7 @@ class BBCompSep(PipelineStage):
         """
         Hamimeche and Lewis likelihood.
         Taken from Cobaya written by H, L and Torrado
-        See: https://github.com/CobayaSampler/cobaya/blob/master/cobaya/likelihoods/_cmblikes_prototype/_cmblikes_prototype.py  # noqa: E501
+        See: https://github.com/CobayaSampler/cobaya/blob/master/cobaya/likelihoods/_cmblikes_prototype/_cmblikes_prototype.py  # noqa
         """
         model_cls = self.model(params)
         dx_vec = []
@@ -571,6 +622,9 @@ class BBCompSep(PipelineStage):
         return dx_vec
 
     def h_and_l(self, C, Chat, Cfl_sqrt):
+        """
+        Evaluate the Hamimeche and Lewis likelihood.
+        """
         try:
             diag, U = np.linalg.eigh(C)
         except:  # noqa
@@ -604,7 +658,7 @@ class BBCompSep(PipelineStage):
 
     def lnlike(self, par):
         """
-        Likelihood without priors. 
+        Likelihood without priors.
         """
         params = self.params.build_params(par)
         if self.use_handl:
@@ -614,17 +668,17 @@ class BBCompSep(PipelineStage):
         else:
             dx = self.chi_sq_dx(params)
         like = -0.5 * np.dot(dx, np.dot(self.invcov, dx))
-        
+
         return like
 
     def emcee_sampler(self):
         """
         Sample the model with MCMC.
         """
-        import emcee
+        import emcee  # noqa
         from multiprocessing import Pool
 
-        fname_temp = self.get_output('output_dir')+'/emcee.npz.h5'
+        fname_temp = self.output_dir + '/emcee.npz.h5'
         backend = emcee.backends.HDFBackend(fname_temp)
 
         nwalkers = self.config['nwalkers']
@@ -637,15 +691,15 @@ class BBCompSep(PipelineStage):
         except AttributeError:
             found_file = False
 
-        if not found_file:
+        if found_file and self.config['resume']:
+            print("Restarting from previous run")
+            pos = None
+            nsteps_use = max(n_iters-nchain, 0)
+        else:
             backend.reset(nwalkers, ndim)
             pos = [self.params.p0 + 1.e-3*np.random.randn(ndim)
                    for i in range(nwalkers)]
             nsteps_use = n_iters
-        else:
-            print("Restarting from previous run")
-            pos = None
-            nsteps_use = max(n_iters-nchain, 0)
 
         with Pool() as pool:  # noqa
             import time
@@ -654,16 +708,18 @@ class BBCompSep(PipelineStage):
                                             self.lnprob,
                                             backend=backend)
             if nsteps_use > 0:
-                sampler.run_mcmc(pos, nsteps_use, store=True, progress=False)
-            end = time.time()
+                sampler.run_mcmc(pos, nsteps_use, store=True, progress=True)
+                end = time.time()
 
         return sampler, end-start
 
     def polychord_sampler(self):
-        import pypolychord
-        from pypolychord.settings import PolyChordSettings
-        from pypolychord.priors import UniformPrior, GaussianPrior
-
+        """
+        Sample the model with PolyChord nested sampler.
+        """
+        import pypolychord  # noqa
+        from pypolychord.settings import PolyChordSettings  # noqa
+        from pypolychord.priors import UniformPrior, GaussianPrior  # noqa
         ndim = len(self.params.p0)
         nder = 0
 
@@ -675,18 +731,23 @@ class BBCompSep(PipelineStage):
             prior = []
             for h, pr in zip(hypercube, self.params.p_free_priors):
                 if pr[1] == 'Gaussian':
-                    prior.append(GaussianPrior(float(pr[2][0]), float(pr[2][1]))(h))  # noqa: E501
+                    prior.append(
+                        GaussianPrior(float(pr[2][0]), float(pr[2][1]))(h)
+                    )
                 else:
-                    prior.append(UniformPrior(float(pr[2][0]), float(pr[2][2]))(h))  # noqa: E501
+                    prior.append(
+                        UniformPrior(float(pr[2][0]), float(pr[2][2]))(h)
+                    )
             return prior
 
         # Optional dumper function giving run-time read access to
         # the live points, dead points, weights and evidences
-        def dumper(live, dead, logweights, logZ, logZerr):  # noqa
+        def dumper(live, dead, logweights, logZ, logZerr):
             print("Last dead point:", dead[-1])
 
         settings = PolyChordSettings(ndim, nder)
-        settings.base_dir = self.get_output('output_dir')+'/polychord'
+        settings.base_dir = self.output_dir + '/polychord'
+        os.makedirs(settings.base_dir, exist_ok=True)
         settings.file_root = 'pch'
         settings.nlive = self.config['nlive']
         settings.num_repeats = self.config['nrepeat']
@@ -694,47 +755,45 @@ class BBCompSep(PipelineStage):
         settings.boost_posterior = 10   # Increase number of posterior samples
         settings.nprior = 200           # Draw nprior initial prior samples
         settings.maximise = True        # Maximize posterior at the end
-        settings.read_resume = False    # Read from resume file of earlier run
-        settings.feedback = 2           # Verbosity {0,1,2,3}
+        settings.read_resume = self.config['resume']   # Resume for earlier run
+        settings.feedback = 0           # Verbosity {0,1,2,3}
 
-        output = pypolychord.run_polychord(likelihood, ndim, nder, settings, 
+        output = pypolychord.run_polychord(likelihood, ndim, nder, settings,
                                            prior, dumper)
 
         return output
 
     def minimizer(self):
         """
-        Find maximum likelihood
+        Find maximum posterior value
         """
-        from scipy.optimize import minimize
+        from scipy.optimize import minimize  # noqa
 
         def chi2(par):
             c2 = -2*self.lnprob(par)
             return c2
 
-        res = minimize(chi2, self.params.p0,
-                       method="Powell")
+        res = minimize(chi2, self.params.p0, method="Powell")
         return res.x
 
     def fisher(self):
         """
-        Evaluate Fisher matrix
+        Evaluate Fisher matrix (corresponding to the posterior distribution)
         """
-        import numdifftools as nd
-        from scipy.optimize import minimize
+        import numdifftools as nd  # noqa
+        from scipy.optimize import minimize  # noqa
 
         def chi2(par):
             c2 = -2*self.lnprob(par)
             return c2
 
-        res = minimize(chi2, self.params.p0,
-                       method="Powell")
+        res = minimize(chi2, self.params.p0, method="Powell")
 
         def lnprobd(p):
-            l = self.lnprob(p)  # noqa
-            if l == -np.inf:
-                l = -1E100  # noqa
-            return l
+            ll = self.lnprob(p)
+            if ll == -np.inf:
+                ll = -1E100
+            return ll
 
         fisher = - nd.Hessian(lnprobd)(res.x)
         return res.x, fisher
@@ -743,7 +802,7 @@ class BBCompSep(PipelineStage):
         """
         Evaluate at a single point
         """
-        chi2 = -2*self.lnprob(self.params.p0)
+        chi2 = -2 * self.lnprob(self.params.p0)
         return chi2
 
     def timing(self, n_eval=300):
@@ -757,7 +816,7 @@ class BBCompSep(PipelineStage):
         end = time.time()
 
         return end-start, (end-start)/n_eval
-    
+
     def predicted_spectra(self, at_min=True, save_npz=True):
         """
         Evaluates model at a the maximum likelihood and
@@ -771,18 +830,17 @@ class BBCompSep(PipelineStage):
             p = self.params.p0
         pars = self.params.build_params(p)
         model_cls = self.model(pars)
-        if self.config['bands'] == 'all':
-            tr_names = sorted(list(self.s.tracers.keys()))
-        else:
-            tr_names = self.config['bands']
+        print("model_cls", model_cls.shape)
+        tr_names = list(self.config['map_sets'].keys())
+
         if save_npz:
-            np.savez(self.get_output('output_dir')+'/cells_model.npz',
-                     tracers=tr_names, 
+            np.savez(self.output_dir+'/cells_model.npz',
+                     tracers=tr_names,
                      ls=self.ell_b,
                      dls=model_cls)
             return
         s = sacc.Sacc()
-        for it, tn in enumerate(tr_names):
+        for tn in tr_names:
             t = self.s.tracers[tn]
             s.add_tracer('NuMap', tn, quantity='cmb_polarization',
                          spin=2, nu=t.nu, bandpass=t.bandpass,
@@ -790,77 +848,146 @@ class BBCompSep(PipelineStage):
                          map_unit='uK_CMB')
         for b1, b2, p1, p2, m1, m2, ind in self._freq_pol_iterator():
             cl = model_cls[:, m1, m2]
-            t1 = tr_names[b1]
-            t2 = tr_names[b2]
             pol1 = self.pols[p1].lower()
             pol2 = self.pols[p2].lower()
             cltyp = f'cl_{pol1}{pol2}'
             win = sacc.BandpowerWindow(self.bpw_l, self.windows[ind].T)
-            s.add_ell_cl(cltyp, t1, t2, self.ell_b, cl, window=win)
+            s.add_ell_cl(cltyp, b1, b2, self.ell_b, cl, window=win)
+
         s.add_covariance(self.bbcovar)
-        s.save_fits(self.get_output('output_dir')+'/cells_model.fits',
+        s.save_fits(self.output_dir+'/cells_model.fits',
                     overwrite=True)
         return
 
     def run(self):
+        """
+        Run the BB component separation stage.
+        """
+        # Make output directory
+        self.output_dir = self.config["output_dir"].format(sim_id=self.sim_id)
+        os.makedirs(self.output_dir, exist_ok=True)
+
+        # Make duplicate of config file
         from shutil import copyfile
-        copyfile(self.get_input('config'), self.get_output('config_copy'))
+        copyfile(self.config_fname,
+                 self.config["config_copy"].format(sim_id=self.sim_id))
         self.setup_compsep()
+
+        # Get the chi2 and best-fit estimates
+        from scipy.stats import chi2 as scipy_chi2
+        sampler = self.minimizer()
+        chi2 = -2*self.lnprob(sampler)
+        ndof = len(self.bbcovar)
+        kwargs = {
+            "params": sampler,
+            "names": self.params.p_free_names,
+            "chi2": chi2,
+            "ndof": len(self.bbcovar),
+            "pte": scipy_chi2.sf(chi2, ndof, loc=0, scale=1)
+        }
+        np.savez(self.output_dir+'/chi2.npz', **kwargs)
+        with open(self.output_dir+'/chi2.txt', 'w') as f:
+            for key, value in kwargs.items():
+                f.write('%s: %s\n' % (key, value))
+        print("Saved best-fit parameters")
+
+        # Get best-fit power spectra
+        at_min = self.config.get('predict_at_minimum', True)
+        save_npz = not self.config.get('predict_to_sacc', False)
+        sampler = self.predicted_spectra(at_min=at_min, save_npz=save_npz)
+        print("Predicted spectra saved")
+
         if self.config.get('sampler') == 'emcee':
             sampler, timing = self.emcee_sampler()
-            chi2 = -2*self.lnprob(self.minimizer())
-            np.savez(self.get_output('output_dir')+'/emcee.npz',
+            np.savez(self.output_dir+'/emcee.npz',
                      chain=sampler.chain,
                      names=self.params.p_free_names,
-                     time=timing,
-                     chi2=chi2,
-                     ndof=len(self.bbcovar))
+                     time=timing)
             print("Finished sampling", timing)
+
         elif self.config.get('sampler') == 'polychord':
+            os.makedirs(self.output_dir + '/polychord/clusters', exist_ok=True)
             sampler = self.polychord_sampler()
             print("Finished sampling")
+
         elif self.config.get('sampler') == 'fisher':
             p0, fisher = self.fisher()
             cov = np.linalg.inv(fisher)
             for i, (n, p) in enumerate(zip(self.params.p_free_names, p0)):
                 print(n+" = %.3lE +- %.3lE" % (p, np.sqrt(cov[i, i])))
-            np.savez(self.get_output('output_dir')+'/fisher.npz',
+            np.savez(self.output_dir+'/fisher.npz',
                      params=p0, fisher=fisher,
                      names=self.params.p_free_names)
-        elif self.config.get('sampler') == 'maximum_likelihood':
-            sampler = self.minimizer()
-            chi2 = -2*self.lnprob(sampler)
-            np.savez(self.get_output('output_dir')+'/chi2.npz',
-                     params=sampler,
-                     names=self.params.p_free_names,
-                     chi2=chi2, ndof=len(self.bbcovar))
-            print("Best fit:")
-            for n, p in zip(self.params.p_free_names, sampler):
-                print(n+" = %.3lE" % p)
-            print("Chi2: %.3lE" % chi2)
+
         elif self.config.get('sampler') == 'single_point':
             sampler = self.singlepoint()
-            np.savez(self.get_output('output_dir')+'/single_point.npz',
+            np.savez(self.output_dir+'/single_point.npz',
                      chi2=sampler, ndof=len(self.bbcovar),
                      names=self.params.p_free_names)
             print("Chi2:", sampler, len(self.bbcovar))
+
         elif self.config.get('sampler') == 'timing':
             sampler = self.timing()
-            np.savez(self.get_output('output_dir')+'/timing.npz',
+            np.savez(self.output_dir+'/timing.npz',
                      timing=sampler[1],
                      names=self.params.p_free_names)
             print("Total time:", sampler[0])
             print("Time per eval:", sampler[1])
-        elif self.config.get('sampler') == 'predicted_spectra':
-            at_min = self.config.get('predict_at_minimum', True)
-            save_npz = not self.config.get('predict_to_sacc', False)
-            sampler = self.predicted_spectra(at_min=at_min, save_npz=save_npz)
-            print("Predicted spectra saved")
         else:
             raise ValueError("Unknown sampler")
 
         return
 
 
+def main(args):
+    """
+    Execute the BBCompSep stage with arguments args:
+        * config: string.
+          Path to configuration file with input parameters.
+    """
+    config = _yaml_loader(args.config)
+
+    # Creating the simulation indices range to loop over
+    sim_ids = config["global"]["sim_ids"]
+    if isinstance(sim_ids, list):
+        sim_ids = np.array(sim_ids, dtype=int)
+    elif isinstance(sim_ids, str):
+        if "," in sim_ids:
+            id_min, id_max = sim_ids.split(",")
+            sim_ids = np.arange(int(id_min), int(id_max)+1)
+        else:
+            sim_ids = np.array([int(sim_ids)])
+    else:
+        sim_ids = [None]
+
+    # MPI related initialization
+    rank, size, comm = mpi.init(True)
+
+    # Initialize tasks for MPI sharing
+    mpi_shared_list = sim_ids
+
+    # Every rank must have the same shared list
+    mpi_shared_list = comm.bcast(mpi_shared_list, root=0)
+    task_ids = mpi.distribute_tasks(size, rank, len(mpi_shared_list),
+                                    logger=None)
+    local_mpi_list = [mpi_shared_list[i] for i in task_ids]
+
+    for sim_id in local_mpi_list:
+        start = time.time()
+        compsep = BBCompSep(args)
+        setattr(compsep, "sim_id", sim_id)
+        compsep.run()
+    mpi.print_rnk0(f"Processed {len(sim_ids)} simulations "
+                   f"in {time.time() - start:.1f} seconds.", rank)
+    comm.Barrier()
+
+
 if __name__ == '__main__':
-    cls = PipelineStage.main()
+    parser = argparse.ArgumentParser(description="SO SAT BB likelihood")
+    parser.add_argument(
+        "--config", type=str,
+        help="Path to yaml file with pipeline configuration"
+    )
+
+    args = parser.parse_args()
+    main(args)

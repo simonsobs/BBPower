@@ -70,8 +70,8 @@ class Bandpass(object):
 
         if self.do_dphi1:
             dphi1 = params[self.name_dphi1]
-            normed_dphi1 = dphi1 * np.pi / 180. * (self.nu - self.nu_mean) / self.nu_mean
-            dphi1_phase = np.cos(2.*normed_dphi1) + 1j * np.sin(2.*normed_dphi1)
+            normed_dphi1 = dphi1 * np.pi / 180. * (self.nu - self.nu_mean) / self.nu_mean  # noqa
+            dphi1_phase = np.cos(2.*normed_dphi1) + 1j * np.sin(2.*normed_dphi1)  # noqa
 
         nu_prime = self.nu + dnu
         # CMB sed

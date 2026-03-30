@@ -79,7 +79,7 @@ class ParameterManager(object):
                 i_bps = 1
                 while 'bandpass_%d' % i_bps in cnf_bps:
                     if cnf_bps['bandpass_%d' % i_bps].get('parameters'):
-                        self._add_parameters(cnf_bps['bandpass_%d' % i_bps]['parameters'])
+                        self._add_parameters(cnf_bps['bandpass_%d' % i_bps]['parameters'])  # noqa
                     i_bps += 1
 
         self.p0 = np.array(self.p0)
@@ -95,6 +95,6 @@ class ParameterManager(object):
             if np.char.lower(pr[1]) == 'gaussian':  # Gaussian prior
                 lnp += -0.5 * ((p - pr[2][0])/pr[2][1])**2
             else:  # Only other option is top-hat
-                if not(float(pr[2][0]) <= p <= float(pr[2][2])):
+                if not (float(pr[2][0]) <= p <= float(pr[2][2])):
                     return -np.inf
         return lnp

@@ -40,7 +40,7 @@ class BBPowerSpecter(PipelineStage):
         # Check that there are enough beams
         if len(beam_fnames) != nbeams:
             raise ValueError("Couldn't find enough beams: "
-                             "%d != %d" (len(beam_fnames), nbeams))
+                             f"{len(beam_fnames)} != {nbeams}")
 
         self.larr_all = np.arange(3*self.nside)
         self.beams = {}
@@ -65,8 +65,7 @@ class BBPowerSpecter(PipelineStage):
                     fname = fname + '.gz'
                 if not os.path.isfile(fname):
                     raise ValueError("Can't find file ", splits_list[s])
-                mp_q, mp_u = hp.read_map(fname, field=[2*b, 2*b+1],
-                                         verbose=False)
+                mp_q, mp_u = hp.read_map(fname, field=[2*b, 2*b+1])
                 fields[name] = self.get_field(b, [mp_q, mp_u])
 
         # Iterate over field pairs
@@ -104,8 +103,7 @@ class BBPowerSpecter(PipelineStage):
     def read_masks(self, nbands):
         self.masks = []
         for i in range(nbands):
-            m = hp.read_map(self.get_input('masks_apodized'),
-                            verbose=False)
+            m = hp.read_map(self.get_input('masks_apodized'))
             self.masks.append(hp.ud_grade(m, nside_out=self.nside))
 
     def get_bandpowers(self):
@@ -114,7 +112,6 @@ class BBPowerSpecter(PipelineStage):
             # Custom spacing
             edges = np.loadtxt(self.config['bpw_edges']).astype(int)
             bpws = np.zeros(3*self.nside, dtype=int)-1
-            weights = np.ones(3*self.nside)
             for ibpw, (l0, lf) in enumerate(zip(edges[:-1], edges[1:])):
                 if lf < 3*self.nside:
                     bpws[l0:lf] = ibpw
@@ -127,17 +124,15 @@ class BBPowerSpecter(PipelineStage):
                     bpws[l0:l0+dell] = ibpw
                     l0 += dell
 
-            is_dell = False
+            f_ell = np.ones_like(self.larr_all, dtype=np.float64)
             if self.config.get('compute_dell'):
-                is_dell = True
-            self.bins = nmt.NmtBin(self.nside,
-                                   bpws=bpws,
+                f_ell = self.larr_all*(self.larr_all+1)/(2*np.pi)
+            self.bins = nmt.NmtBin(bpws=bpws,
                                    ells=self.larr_all,
-                                   weights=weights,
-                                   is_Dell=is_dell)
+                                   lmax=3*self.nside-1,
+                                   f_ell=f_ell)
         else:  # otherwise it could be a constant integer interval
-            self.bins = nmt.NmtBin(self.nside,
-                                   nlb=int(self.config['bpw_edges']))
+            raise NotImplementedError("Constant-width ell bins not supported.")
 
     def get_fname_workspace(self, band1, band2):
         b1 = min(band1, band2)
@@ -167,8 +162,7 @@ class BBPowerSpecter(PipelineStage):
             mdum = np.zeros([2, self.npix])
             f1 = self.get_field(b1, mdum)
             f2 = self.get_field(b2, mdum)
-            w.compute_coupling_matrix(f1, f2, self.bins,
-                                      n_iter=self.config['n_iter'])
+            w.compute_coupling_matrix(f1, f2, self.bins)
             w.write_to(fname)
 
         return w
@@ -203,7 +197,7 @@ class BBPowerSpecter(PipelineStage):
                         splits_range = range(self.nsplits)
                     for s2 in splits_range:
                         l2 = self.get_map_label(b2, s2)
-                        yield(b1, b2, s1, s2, l1, l2)
+                        yield (b1, b2, s1, s2, l1, l2)
 
     def get_sacc_tracers(self):
         sacc_t = []
@@ -228,13 +222,13 @@ class BBPowerSpecter(PipelineStage):
                 wsp = self.workspaces[name]
                 bpw_win = wsp.get_bandpower_windows()
                 windows_wsp[name]['EE'] = sacc.BandpowerWindow(self.larr_all,
-                                                               bpw_win[0, :, 0, :].T)
+                                                               bpw_win[0, :, 0, :].T)  # noqa: E501
                 windows_wsp[name]['EB'] = sacc.BandpowerWindow(self.larr_all,
-                                                               bpw_win[1, :, 1, :].T)
+                                                               bpw_win[1, :, 1, :].T)  # noqa: E501
                 windows_wsp[name]['BE'] = sacc.BandpowerWindow(self.larr_all,
-                                                               bpw_win[2, :, 2, :].T)
+                                                               bpw_win[2, :, 2, :].T)  # noqa: E501
                 windows_wsp[name]['BB'] = sacc.BandpowerWindow(self.larr_all,
-                                                               bpw_win[3, :, 3, :].T)
+                                                               bpw_win[3, :, 3, :].T)  # noqa: E501
         return windows_wsp
 
     def save_cell_to_file(self, cell, tracers, fname, with_windows=False):
