@@ -1,0 +1,19 @@
+# Allowed values: baseline/goal
+sensitivity: baseline
+# Allowed values:
+#  - pessimistic/optimistic
+#  - custom: in this case, include also a transfer function (below)
+one_over_f: optimistic
+# If `one_over_f == 'custom'`, pass a transfer function below.
+# The format of this file should be two columns: ell, T_ell
+transfer: bb4cast/params/transfer_dummy.txt
+# Number of detector-years in each band
+# Values below are the nominal SO 5-year survey
+ydet_LF: 1.
+ydet_MF: 9.
+ydet_UHF: 5.
+recompute_data: False
+# How do you call python?
+pyexec: "python3"
+# Sampler to use (Fisher matrix)
+sampler: fisher

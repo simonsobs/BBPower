@@ -1,0 +1,30 @@
+bands:
+  LF1:
+    freq: 27.
+    beam: 91.
+    bandpass: examples/data/bandpasses/LF1.txt
+  LF2:
+    freq: 39.
+    beam: 63.
+    bandpass: examples/data/bandpasses/LF2.txt
+  MF1:
+    freq: 93.
+    beam: 30.
+    bandpass: examples/data/bandpasses/MF1.txt
+  MF2:
+    freq: 145.
+    beam: 17.
+    bandpass: examples/data/bandpasses/MF2.txt
+  UHF1:
+    freq: 225.
+    beam: 11.
+    bandpass: examples/data/bandpasses/UHF1.txt
+  UHF2:
+    freq: 280.
+    beam: 9.
+    bandpass: examples/data/bandpasses/UHF2.txt
+
+f_sky: 0.184
+f_sky_ss: 0.114
+f_sky_sn: 0.152
+f_sky_nn: 0.184

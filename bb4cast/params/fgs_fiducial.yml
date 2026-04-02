@@ -1,0 +1,13 @@
+fg:
+  A_sync_BB: 1.6
+  EB_sync: 2.0
+  alpha_sync_EE: -0.9
+  alpha_sync_BB: -0.9
+  beta_sync: -3.1
+  A_dust_BB: 28.0
+  EB_dust: 2.0
+  alpha_dust_EE: -0.2
+  alpha_dust_BB: -0.2
+  Alens: 1.
+  r: 0.
+  use_moments: False
