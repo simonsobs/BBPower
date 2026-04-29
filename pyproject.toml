@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bbpower"
+version = "0.1.0"
+description = "Power-spectrum based BBPipe stages for Simons Observatory B-mode analyses."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "BSD-3-Clause"}
+authors = [
+  {name = "Simons Observatory BB AWG"},
+]
+dependencies = [
+  "numpy>=2.0",
+  "scipy>=1.14",
+  "sympy>=1.13",
+  "PyYAML>=6.0.1",
+  "sacc>=2.1",
+  "emcee>=3.1",
+  "dominate>=2.9",
+  "matplotlib>=3.9",
+  "bbpipe @ git+https://github.com/simonsobs/BBPipe.git",
+]
+
+[project.optional-dependencies]
+plotting = [
+  "getdist>=1.7",
+]
+compsep = [
+  "fgbuster @ git+https://github.com/fgbuster/fgbuster.git",
+]
+power-spectra = [
+  "healpy>=1.19",
+  "pymaster>=2.4",
+]
+sampling = [
+  "numdifftools>=0.9",
+  "pyshtools>=4.10",
+]
+all = [
+  "getdist>=1.7",
+  "fgbuster @ git+https://github.com/fgbuster/fgbuster.git",
+  "healpy>=1.19",
+  "pymaster>=2.4",
+  "numdifftools>=0.9",
+  "pyshtools>=4.10",
+]
+
+[project.scripts]
+bbpower = "bbpower.__main__:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers", "--tb=short"]
+markers = [
+    "slow: tests needing heavy computation or generated data",
+    "requires_fgbuster: tests needing fgbuster import",
+]
+filterwarnings = ["ignore::DeprecationWarning:sympy.*"]
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+
+[tool.setuptools.packages.find]
+include = ["bbpower*"]

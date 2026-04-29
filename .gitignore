@@ -1,3 +1,12 @@
-bbpower/__pycache__/
-test/test_out/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+test/test_out*/
+
+.conda-py313/
+.claude/
+
+.nfs*
 *~

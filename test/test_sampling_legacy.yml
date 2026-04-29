@@ -1,0 +1,27 @@
+# Legacy BBPipe-style pipeline file for the direct sampling smoke test.
+# Prefer explicit stage commands in run_sampling_legacy_test.sh for debugging.
+
+modules: bbpower
+
+launcher: local
+
+stages:
+    - name: BBCompSep
+      nprocess: 1
+    - name: BBPlotter
+      nprocess: 1
+
+inputs:
+    cells_coadded: ./test/test_out/cls_coadd.fits
+    cells_fiducial: ./test/test_out/cls_fid.fits
+    cells_noise: ./test/test_out/cls_noise.fits
+    cells_null: ./test/test_out/cls_coadd.fits
+    cells_coadded_total: ./test/test_out/cls_coadd.fits
+
+config: ./test/test_config_sampling_legacy.yml
+
+resume: False
+
+output_dir: ./test/test_out
+log_dir: ./test/test_out
+pipeline_log: ./test/test_out/log.txt

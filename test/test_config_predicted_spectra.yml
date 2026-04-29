@@ -17,7 +17,7 @@ BBPowerSummarizer:
     data_covar_diag_order: 0
 
 BBCompSep:
-    # Sampler type (choose 'emcee', 'polychord', 'maximum_likelihood', 
+    # Sampler type (choose 'emcee', 'polychord', 'maximum_likelihood',
     # 'single_point' or 'timing')
     sampler: 'predicted_spectra'
     # If you chose polychord:
@@ -40,7 +40,7 @@ BBCompSep:
     cmb_model:
         # Template power spectrum. Should contained the lensed power spectra
         # with r=0 and r=1 respectively.
-        cmb_templates: ["./examples/data/camb_lens_nobb.dat", 
+        cmb_templates: ["./examples/data/camb_lens_nobb.dat",
                         "./examples/data/camb_lens_r1.dat"]
         # Free parameters
         params:

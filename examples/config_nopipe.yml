@@ -29,7 +29,7 @@ global:
         cells_coadded_total: null
         # Path to sacc file with null-test power spectra
         cells_null: null
-    
+
     map_sets:
         SATp3_f150_south_science:
             beam_file: null
