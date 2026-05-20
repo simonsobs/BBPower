@@ -11,6 +11,20 @@ size = 1
 comm = None
 
 
+class _SerialComm:
+    def bcast(self, value, root=0):
+        return value
+
+    def Barrier(self):
+        return None
+
+    def Get_rank(self):
+        return 0
+
+    def Get_size(self):
+        return 1
+
+
 def print_rnk0(text, rank):
     if rank == 0:
         print(text)
@@ -47,6 +61,9 @@ def init(switch=False):
     except ImportError as exc:
         sys.stderr.write("IMPORT ERROR: " + __file__ + " (" + str(exc) + "). "
                          "Could not load mpi4py. MPI will not be used.\n")
+        comm = _SerialComm()
+        rank = 0
+        size = 1
     return rank, size, comm
 
 

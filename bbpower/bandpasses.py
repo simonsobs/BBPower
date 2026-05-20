@@ -2,19 +2,23 @@ import numpy as np
 
 
 class Bandpass(object):
-    def __init__(self, nu, dnu, bnu, bp_number, config, phi_nu=None):
+    def __init__(self, nu, dnu, bnu, bp_number, config, phi_nu=None,
+                 tracer_name=None, pol_order=None):
         self.number = bp_number
+        self.tracer_name = tracer_name
+        self.pol_order = pol_order or {'E': 0, 'B': 1}
+        self.npol = len(self.pol_order)
         self.nu = nu
         self.bnu_dnu = bnu * dnu
         cmbs = self.sed_CMB_RJ(self.nu)
         self.nu_mean = (np.sum(cmbs * self.bnu_dnu * nu**3) /
                         np.sum(cmbs * self.bnu_dnu * nu**2))
         self.cmb_norm = np.sum(cmbs * self.bnu_dnu * nu**2)
-        field = 'bandpass_%d' % bp_number
+        self.config = self._get_systematics_config(config)
 
         # Get frequency-dependent angle if necessary
         try:
-            fname = config['systematics']['bandpasses'][field]['phase_nu']
+            fname = self.config['phase_nu']
         except KeyError:
             fname = None
             self.is_complex = False
@@ -35,27 +39,61 @@ class Bandpass(object):
         self.name_gain = None
         self.do_angle = False
         self.name_angle = None
+        self.do_pol_eff = False
+        self.name_pol_eff = None
+        self.do_beam = False
+        self.name_beam = None
         self.do_dphi1 = False
         self.name_dphi1 = None
         try:
-            d = config['systematics']['bandpasses'][field]['parameters']
+            d = self.config['parameters']
         except KeyError:
             d = {}
         for n, p in d.items():
-            if p[0] == 'shift':
+            ptype = p[0].lower()
+            if ptype == 'shift':
                 self.do_shift = True
                 self.name_shift = n
-            if p[0] == 'gain':
+            if ptype == 'gain':
                 self.do_gain = True
                 self.name_gain = n
-            if p[0] == 'angle':
+            if ptype == 'angle':
                 self.do_angle = True
                 self.name_angle = n
-            if p[0] == 'dphi1':
+            if ptype in ('pol_eff', 'poleff', 'polarization_efficiency',
+                         'polarization_eff'):
+                self.do_pol_eff = True
+                self.name_pol_eff = n
+            if ptype in ('beam', 'fwhm', 'fwhm_arcmin'):
+                self.do_beam = True
+                self.name_beam = n
+            if ptype == 'dphi1':
                 self.do_dphi1 = True
                 self.is_complex = True
                 self.name_dphi1 = n
         return
+
+    def _get_systematics_config(self, config):
+        try:
+            bandpasses = config['systematics']['bandpasses']
+        except KeyError:
+            return {}
+
+        numbered = 'bandpass_%d' % self.number
+        if numbered in bandpasses:
+            return bandpasses[numbered] or {}
+
+        if self.tracer_name is None:
+            return {}
+
+        if self.tracer_name in bandpasses:
+            return bandpasses[self.tracer_name] or {}
+
+        tracer_lower = self.tracer_name.lower()
+        for key, value in bandpasses.items():
+            if key.lower() == tracer_lower:
+                return value or {}
+        return {}
 
     def sed_CMB_RJ(self, nu):
         x = 0.01760867023799751*nu
@@ -87,20 +125,56 @@ class Bandpass(object):
             mod = abs(conv_sed)
             cs = conv_sed.real/mod
             sn = conv_sed.imag/mod
-            return mod, np.array([[cs, sn],
-                                  [-sn, cs]])
+            return mod, self._rotation_matrix_from_cos_sin(cs, sn)
         else:
             return conv_sed, None
+
+    def _rotation_matrix_from_cos_sin(self, cs, sn):
+        mat = np.eye(self.npol)
+        i_e = self.pol_order.get('E')
+        i_b = self.pol_order.get('B')
+        if (i_e is not None) and (i_b is not None):
+            mat[i_e, i_e] = cs
+            mat[i_e, i_b] = sn
+            mat[i_b, i_e] = -sn
+            mat[i_b, i_b] = cs
+        elif i_e is not None:
+            mat[i_e, i_e] = cs
+        elif i_b is not None:
+            mat[i_b, i_b] = cs
+        return mat
 
     def get_rotation_matrix(self, params):
         if self.do_angle:
             phi = np.radians(params[self.name_angle])
             c = np.cos(2*phi)
             s = np.sin(2*phi)
-            return np.array([[c, s],
-                             [-s, c]])
+            return self._rotation_matrix_from_cos_sin(c, s)
         else:
             return None
+
+    def get_polarization_efficiency(self, params):
+        if self.do_pol_eff:
+            return params[self.name_pol_eff]
+        return 1.
+
+    def get_polarization_efficiency_vector(self, params):
+        eff = self.get_polarization_efficiency(params)
+        vec = np.ones(self.npol)
+        for pol in ('E', 'B'):
+            ind = self.pol_order.get(pol)
+            if ind is not None:
+                vec[ind] = eff
+        return vec
+
+    def get_beam_profile(self, ell, params):
+        if not self.do_beam:
+            return np.ones_like(ell, dtype=float)
+        fwhm_arcmin = params[self.name_beam]
+        if fwhm_arcmin <= 0:
+            return np.ones_like(ell, dtype=float)
+        sigma = np.radians(fwhm_arcmin/60.) / np.sqrt(8. * np.log(2.))
+        return np.exp(-0.5 * ell * (ell + 1.) * sigma**2)
 
 
 def rotate_cells_mat(mat1, mat2, cls):

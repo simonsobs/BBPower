@@ -76,11 +76,9 @@ class ParameterManager(object):
             # Bandpasses
             if 'bandpasses' in cnf_sys.keys():
                 cnf_bps = cnf_sys['bandpasses']
-                i_bps = 1
-                while 'bandpass_%d' % i_bps in cnf_bps:
-                    if cnf_bps['bandpass_%d' % i_bps].get('parameters'):
-                        self._add_parameters(cnf_bps['bandpass_%d' % i_bps]['parameters'])  # noqa
-                    i_bps += 1
+                for _, bandpass in cnf_bps.items():
+                    if bandpass and bandpass.get('parameters'):
+                        self._add_parameters(bandpass['parameters'])
 
         self.p0 = np.array(self.p0)
 

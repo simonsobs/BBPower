@@ -3,7 +3,13 @@ import os
 import argparse
 import yaml
 import time
-import sacc  # noqa
+try:
+    import sacc  # noqa
+    _Sacc = sacc.Sacc
+    _BandpowerWindow = sacc.BandpowerWindow
+except (ImportError, AttributeError):
+    from sacc.sacc import Sacc as _Sacc  # noqa
+    from sacc.sacc import BandpowerWindow as _BandpowerWindow  # noqa
 import sys
 sys.path.append(
     os.path.abspath(os.path.join(os.path.dirname(__file__), '.'))
@@ -14,6 +20,16 @@ from fg_model import FGModel  # noqa
 from param_manager import ParameterManager  # noqa
 from bandpasses import (Bandpass, rotate_cells, rotate_cells_mat,  # noqa
                         decorrelated_bpass)
+from sacc_compat import NuMapSacc  # noqa
+
+
+def _load_sacc_file(path):
+    try:
+        return _Sacc.load_fits(path)
+    except KeyError as err:
+        if "Unknown table type tracer:NuMap" in str(err):
+            return NuMapSacc.load_fits(path)
+        raise
 
 
 def _yaml_loader(config):
@@ -93,9 +109,37 @@ class BBCompSep(object):
         self.big_w3j = self.big_w3j**2
 
     def matrix_to_vector(self, mat):
+        vector_entries = getattr(self, 'vector_entries', None)
+        if vector_entries is not None:
+            if mat.ndim == 2:
+                return np.array([mat[m1, m2]
+                                 for _, _, _, _, m1, m2, _ in vector_entries])
+            if mat.ndim == 3:
+                return np.stack([mat[:, m1, m2]
+                                 for _, _, _, _, m1, m2, _ in vector_entries],
+                                axis=-1)
+            raise ValueError("Input matrix can only be 2- or 3-D")
+
         return mat[..., self.index_ut[0], self.index_ut[1]]
 
     def vector_to_matrix(self, vec):
+        vector_entries = getattr(self, 'vector_entries', None)
+        if vector_entries is not None:
+            if vec.ndim == 1:
+                mat = np.zeros([self.nmaps, self.nmaps])
+                for value, (_, _, _, _, m1, m2, _) in zip(vec,
+                                                          vector_entries):
+                    mat[m1, m2] = value
+                    mat[m2, m1] = value
+            elif vec.ndim == 2:
+                mat = np.zeros([len(vec), self.nmaps, self.nmaps])
+                for ind, (_, _, _, _, m1, m2, _) in enumerate(vector_entries):
+                    mat[:, m1, m2] = vec[:, ind]
+                    mat[:, m2, m1] = vec[:, ind]
+            else:
+                raise ValueError("Input vector can only be 1- or 2-D")
+            return mat
+
         if vec.ndim == 1:
             mat = np.zeros([self.nmaps, self.nmaps])
             mat[self.index_ut] = vec
@@ -109,21 +153,104 @@ class BBCompSep(object):
             raise ValueError("Input vector can only be 1- or 2-D")
         return mat
 
+    def prepare_inverse_covariance(self):
+        """
+        Prepare the covariance and inverse covariance used by the likelihood.
+        """
+        mode = str(self.config.get('covariance_mode', 'full')).lower()
+        cov = 0.5 * (self.bbcovar + self.bbcovar.T)
+
+        if mode in ('diagonal', 'diag'):
+            diag = np.diag(cov).copy()
+            if np.any(diag <= 0):
+                raise ValueError("Covariance diagonal must be positive")
+            self.bbcovar = np.diag(diag)
+            self.invcov = np.diag(1. / diag)
+            print("Using diagonal covariance")
+            return
+
+        if mode in ('eigenvalue_clip', 'eigenvalue_floor', 'eig_clip'):
+            eig_floor_rel = float(
+                self.config.get('covariance_eig_floor_rel', 1.e-8)
+            )
+            eig_floor_abs = float(
+                self.config.get('covariance_eig_floor_abs', 0.)
+            )
+            eigvals, eigvecs = np.linalg.eigh(cov)
+            max_eval = np.max(eigvals)
+            floor = max(eig_floor_abs, eig_floor_rel * max_eval)
+            if floor <= 0:
+                raise ValueError("Covariance eigenvalue floor must be positive")
+            eigvals_clip = np.clip(eigvals, floor, None)
+            self.bbcovar = (eigvecs * eigvals_clip).dot(eigvecs.T)
+            self.invcov = (eigvecs / eigvals_clip).dot(eigvecs.T)
+            print(
+                "Using eigenvalue-clipped covariance "
+                f"(floor={floor:.6e}, clipped={np.sum(eigvals < floor)})"
+            )
+            return
+
+        if mode == 'full':
+            self.bbcovar = cov
+            self.invcov = np.linalg.solve(
+                self.bbcovar, np.identity(len(self.bbcovar))
+            )
+            print("Using full covariance")
+            return
+
+        raise ValueError(
+            "Unknown covariance_mode. Use 'full', 'diagonal', or "
+            "'eigenvalue_clip'."
+        )
+
     def _freq_pol_iterator(self):
         icl = -1
         map_sets = list(self.config["map_sets"])
+        fit_spectra = getattr(self, 'fit_spectra', None)
+        include_planck_auto = getattr(self, 'include_planck_auto', True)
         for b1 in range(len(map_sets)):
             for p1 in range(self.npol):
                 m1 = p1 + self.npol * b1
                 for b2 in range(b1, len(map_sets)):
+                    if ((not include_planck_auto) and
+                            self._is_planck_tracer(map_sets[b1]) and
+                            self._is_planck_tracer(map_sets[b2])):
+                        continue
                     if b1 == b2:
                         p2_r = range(p1, self.npol)
                     else:
                         p2_r = range(self.npol)
                     for p2 in p2_r:
+                        spec = self.pols[p1] + self.pols[p2]
+                        if fit_spectra is not None and spec not in fit_spectra:
+                            continue
                         m2 = p2 + self.npol * b2
                         icl += 1
                         yield map_sets[b1], map_sets[b2], p1, p2, m1, m2, icl
+
+    def _is_planck_tracer(self, tracer):
+        return str(tracer).lower().startswith('planck')
+
+    def _normalize_pol(self, pol):
+        pol = str(pol).upper()
+        if pol in ('T', '0'):
+            return 'T'
+        if pol in ('E', 'B'):
+            return pol
+        raise ValueError("Unknown polarization channel %s" % pol)
+
+    def _sacc_pol(self, pol):
+        return {'T': '0', 'E': 'e', 'B': 'b'}[pol]
+
+    def _cl_type(self, pol1, pol2):
+        return 'cl_' + self._sacc_pol(pol1) + self._sacc_pol(pol2)
+
+    def _normalize_spectrum_label(self, spec):
+        spec = str(spec).lower().replace('cl_', '')
+        spec = spec.replace('0', 't')
+        if len(spec) != 2:
+            raise ValueError("Spectrum labels must have two fields")
+        return ''.join(self._normalize_pol(p) for p in spec)
 
     def parse_sacc_file(self):
         """
@@ -137,11 +264,11 @@ class BBCompSep(object):
 
         # Read data
         cells_coadded = self.data["cells_coadded"].format(sim_id=self.sim_id)
-        self.s = sacc.Sacc.load_fits(cells_coadded)
-        self.s_cov = sacc.Sacc.load_fits(self.data["cells_coadded_cov"])
+        self.s = _load_sacc_file(cells_coadded)
+        self.s_cov = _load_sacc_file(self.data["cells_coadded_cov"])
         if self.use_handl:
-            s_fid = sacc.Sacc.load_fits(self.data["cells_fiducial"])
-            s_noi = sacc.Sacc.load_fits(self.data["cells_noise"])
+            s_fid = _load_sacc_file(self.data["cells_fiducial"])
+            s_noi = _load_sacc_file(self.data["cells_noise"])
 
         # Keep only desired tracers
         tr_names = list(self.config['map_sets'].keys())
@@ -153,16 +280,33 @@ class BBCompSep(object):
         tr_comb = self.s.get_tracer_combinations()
 
         # Keep only desired correlations
-        self.pols = self.config['pol_channels']
+        self.pols = [self._normalize_pol(p)
+                     for p in self.config['pol_channels']]
+        self.config['pol_channels'] = self.pols
+        self.fit_spectra = None
+        if self.config.get('fit_spectra') is not None:
+            self.fit_spectra = [
+                self._normalize_spectrum_label(s)
+                for s in self.config['fit_spectra']
+            ]
+        self.include_planck_auto = self.config.get(
+            'include_planck_auto', True
+        )
         corr_all = ['cl_00', 'cl_0e', 'cl_0b', 'cl_e0', 'cl_b0',
                     'cl_ee', 'cl_eb', 'cl_be', 'cl_bb']
-        corr_keep = []
-        for m1 in self.pols:
-            for m2 in self.pols:
-                clname = 'cl_' + m1.lower() + m2.lower()
-                if "0" in clname:
-                    continue
-                corr_keep.append(clname)
+        if self.fit_spectra is None:
+            corr_keep = []
+            for m1 in self.pols:
+                for m2 in self.pols:
+                    corr_keep.append(self._cl_type(m1, m2))
+        else:
+            corr_keep = [
+                self._cl_type(spec[0], spec[1])
+                for spec in self.fit_spectra
+            ]
+        corr_keep = list(dict.fromkeys(corr_keep))
+        if not corr_keep:
+            raise ValueError("No spectra selected for the likelihood")
         for c in corr_all:
             if c not in corr_keep:
                 self.s.remove_selection(c)
@@ -182,15 +326,17 @@ class BBCompSep(object):
             s_noi.remove_selection(ell__gt=self.config['l_max'])
             s_noi.remove_selection(ell__lt=self.config['l_min'])
 
+        check_type = corr_keep[0]
         for tr1, tr2 in tr_comb:
-            ind1 = self.s.indices(data_type='cl_bb', tracers=(tr1, tr2))
-            ind2 = self.s_cov.indices(data_type='cl_bb', tracers=(tr1, tr2))
+            ind1 = self.s.indices(data_type=check_type, tracers=(tr1, tr2))
+            ind2 = self.s_cov.indices(data_type=check_type,
+                                      tracers=(tr1, tr2))
             assert np.all(ind1 == ind2), "Covariance sacc ordering is wrong"
             if self.use_handl:
-                ind3 = self.s_fid.indices(data_type='cl_bb',
-                                          tracers=(tr1, tr2))
-                ind4 = self.s_noi.indices(data_type='cl_bb',
-                                          tracers=(tr1, tr2))
+                ind3 = s_fid.indices(data_type=check_type,
+                                     tracers=(tr1, tr2))
+                ind4 = s_noi.indices(data_type=check_type,
+                                     tracers=(tr1, tr2))
                 assert np.all(ind1 == ind3), "Fiducial sacc ordering is wrong"
                 assert np.all(ind1 == ind4), "Noise sacc ordering is wrong"
 
@@ -198,8 +344,12 @@ class BBCompSep(object):
         self.npol = len(self.pols)
         self.nmaps = self.nfreqs * self.npol
         self.index_ut = np.triu_indices(self.nmaps)
-        self.ncross = (self.nmaps * (self.nmaps + 1)) // 2
         self.pol_order = dict(zip(self.pols, range(self.npol)))
+        self.map_set_order = dict(zip(tr_names, range(self.nfreqs)))
+        self.vector_entries = list(self._freq_pol_iterator())
+        self.ncross = len(self.vector_entries)
+        if self.ncross == 0:
+            raise ValueError("No tracer/polarization combinations selected")
 
         # Collect bandpasses
         self.bpss = []
@@ -211,14 +361,18 @@ class BBCompSep(object):
             dnu[0] = nu[1] - nu[0]
             dnu[-1] = nu[-1] - nu[-2]
             bnu = t.bandpass
-            self.bpss.append(Bandpass(nu, dnu, bnu, i_t+1, self.config))
+            self.bpss.append(Bandpass(nu, dnu, bnu, i_t+1, self.config,
+                                      tracer_name=tn,
+                                      pol_order=self.pol_order))
 
         # Get ell sampling
         # Example power spectrum
-        self.ell_b, _ = self.s.get_ell_cl('cl_' + 2 * self.pols[0].lower(),
-                                          tr_names[0], tr_names[0])
+        b1, b2, p1, p2, _, _, _ = self.vector_entries[0]
+        first_type = self._cl_type(self.pols[p1], self.pols[p2])
+        self.ell_b, _ = self.s.get_ell_cl(first_type, b1, b2)
         # Avoid l<2
-        win0 = self.s.data[0]['window']
+        ind0 = self.s.indices(first_type, (b1, b2))
+        win0 = self.s.data[ind0[0]]['window']
         mask_w = win0.values > 1
         self.bpw_l = win0.values[mask_w]
         self.n_ell = len(self.bpw_l)
@@ -228,9 +382,8 @@ class BBCompSep(object):
         self.windows = np.zeros([self.ncross, self.n_bpws, self.n_ell])
 
         # Get power spectra and covariances
-        if not (self.s_cov.covariance.covmat.shape[-1] == len(self.s.mean)
-                == self.n_bpws * (self.nfreqs * (self.nfreqs + 1)) // 2 * self.npol**2):  # noqa
-            raise ValueError("C_ell vector's size is wrong")
+        if self.s_cov.covariance.covmat.shape[-1] != len(self.s.mean):
+            raise ValueError("Covariance and data vector sizes differ")
 
         v2d = np.zeros([self.n_bpws, self.ncross])
         if self.use_handl:
@@ -238,17 +391,11 @@ class BBCompSep(object):
             v2d_fid = np.zeros([self.n_bpws, self.ncross])
         cv2d = np.zeros([self.n_bpws, self.ncross, self.n_bpws, self.ncross])
 
-        self.vector_indices = self.vector_to_matrix(
-            np.arange(self.ncross, dtype=int)
-        ).astype(int)
         self.indx = []
 
         # Parse into the right ordering
-        itr1 = self._freq_pol_iterator()
-        for b1, b2, p1, p2, m1, m2, ind_vec in itr1:
-            pol1 = self.pols[p1].lower()
-            pol2 = self.pols[p2].lower()
-            cl_typ = f'cl_{pol1}{pol2}'
+        for b1, b2, p1, p2, m1, m2, ind_vec in self.vector_entries:
+            cl_typ = self._cl_type(self.pols[p1], self.pols[p2])
             ind_a = self.s.indices(cl_typ, (b1, b2))
             if len(ind_a) != self.n_bpws:
                 raise ValueError("All power spectra need to be "
@@ -259,11 +406,8 @@ class BBCompSep(object):
             if self.use_handl:
                 _, v2d_noi[:, ind_vec] = s_noi.get_ell_cl(cl_typ, b1, b2)
                 _, v2d_fid[:, ind_vec] = s_fid.get_ell_cl(cl_typ, b1, b2)
-            itr2 = self._freq_pol_iterator()
-            for b1b, b2b, p1b, p2b, _, _, ind_vecb in itr2:
-                pol1b = self.pols[p1b].lower()
-                pol2b = self.pols[p2b].lower()
-                cl_typb = f'cl_{pol1b}{pol2b}'
+            for b1b, b2b, p1b, p2b, _, _, ind_vecb in self.vector_entries:
+                cl_typb = self._cl_type(self.pols[p1b], self.pols[p2b])
                 ind_b = self.s.indices(cl_typb, (b1b, b2b))
                 cv2d[:, ind_vec, :, ind_vecb] = self.s_cov.covariance.covmat[ind_a][:, ind_b]  # noqa
 
@@ -274,10 +418,10 @@ class BBCompSep(object):
             self.bbfiducial = self.vector_to_matrix(v2d_fid)
         self.bbcovar = cv2d.reshape([self.n_bpws * self.ncross,
                                      self.n_bpws * self.ncross])
-        self.invcov = np.linalg.solve(self.bbcovar,
-                                      np.identity(len(self.bbcovar)))
+        self.prepare_inverse_covariance()
         np.savez(self.output_dir + '/data_ell_cl_invcov.npz',
-                 ell=self.ell_b, cl=self.bbdata, invcov=self.invcov)
+                 ell=self.ell_b, cl=self.bbdata, invcov=self.invcov,
+                 covariance_mode=self.config.get('covariance_mode', 'full'))
         return
 
     def load_cmb(self):
@@ -298,16 +442,33 @@ class BBCompSep(object):
         self.cmb_tens = np.zeros([self.npol, self.npol, nell])
         self.cmb_lens = np.zeros([self.npol, self.npol, nell])
         self.cmb_scal = np.zeros([self.npol, self.npol, nell])
-        if 'B' in self.config['pol_channels']:
-            ind = self.pol_order['B']
-            self.cmb_tens[ind, ind] = (cmb_bbfile[:, 3][mask] -
-                                       cmb_lensingfile[:, 3][mask])
-            self.cmb_lens[ind, ind] = cmb_lensingfile[:, 3][mask]
-        if 'E' in self.config['pol_channels']:
-            ind = self.pol_order['E']
-            self.cmb_tens[ind, ind] = (cmb_bbfile[:, 2][mask] -
-                                       cmb_lensingfile[:, 2][mask])
-            self.cmb_scal[ind, ind] = cmb_lensingfile[:, 2][mask]
+
+        def add_cmb(pol1, pol2, col, lensing_amplitude=False):
+            if ((pol1 not in self.pol_order) or
+                    (pol2 not in self.pol_order) or
+                    (cmb_bbfile.shape[1] <= col) or
+                    (cmb_lensingfile.shape[1] <= col)):
+                return
+            i1 = self.pol_order[pol1]
+            i2 = self.pol_order[pol2]
+            tens = cmb_bbfile[:, col][mask] - cmb_lensingfile[:, col][mask]
+            scal = cmb_lensingfile[:, col][mask]
+            self.cmb_tens[i1, i2] = tens
+            if lensing_amplitude:
+                self.cmb_lens[i1, i2] = scal
+            else:
+                self.cmb_scal[i1, i2] = scal
+            if i1 != i2:
+                self.cmb_tens[i2, i1] = tens
+                if lensing_amplitude:
+                    self.cmb_lens[i2, i1] = scal
+                else:
+                    self.cmb_scal[i2, i1] = scal
+
+        add_cmb('T', 'T', 1)
+        add_cmb('E', 'E', 2)
+        add_cmb('B', 'B', 3, lensing_amplitude=True)
+        add_cmb('T', 'E', 4)
         return
 
     def integrate_seds(self, params):
@@ -504,23 +665,35 @@ class BBCompSep(object):
                                       (fg_scaling[c1, c1, f1, f1])**0.5) * cls_02[c1]  # noqa
                     cls_array_fg[f1, f2] += cls
 
+        # Beam transfer
+        for f1 in range(self.nfreqs):
+            beam1 = self.bpss[f1].get_beam_profile(self.bpw_l, params)
+            for f2 in range(f1, self.nfreqs):
+                beam2 = self.bpss[f2].get_beam_profile(self.bpw_l, params)
+                cls_array_fg[f1, f2] *= beam1[:, None, None]
+                cls_array_fg[f1, f2] *= beam2[:, None, None]
+
         # Bandpower window convolution
         cls_array_list = np.zeros([self.n_bpws, self.nfreqs,
                                    self.npol, self.nfreqs,
                                    self.npol])
+        for b1, b2, p1, p2, m1, m2, ind in self.vector_entries:
+            f1 = self.map_set_order[b1]
+            f2 = self.map_set_order[b2]
+            windows = self.windows[ind]
+            clband = np.dot(windows, cls_array_fg[f1, f2, :, p1, p2])
+            cls_array_list[:, f1, p1, f2, p2] = clband
+            if m1 != m2:
+                cls_array_list[:, f2, p2, f1, p1] = clband
+
+        # Polarization efficiency
         for f1 in range(self.nfreqs):
-            for p1 in range(self.npol):
-                m1 = f1*self.npol+p1
-                for f2 in range(f1, self.nfreqs):
-                    p0 = p1 if f1 == f2 else 0
-                    for p2 in range(p0, self.npol):
-                        m2 = f2*self.npol+p2
-                        windows = self.windows[self.vector_indices[m1, m2]]
-                        clband = np.dot(windows, cls_array_fg[f1, f2, :,
-                                                              p1, p2])
-                        cls_array_list[:, f1, p1, f2, p2] = clband
-                        if m1 != m2:
-                            cls_array_list[:, f2, p2, f1, p1] = clband
+            eff1 = self.bpss[f1].get_polarization_efficiency_vector(params)
+            for f2 in range(self.nfreqs):
+                eff2 = self.bpss[f2].get_polarization_efficiency_vector(params)
+                cls_array_list[:, f1, :, f2, :] *= (
+                    eff1[None, :, None] * eff2[None, None, :]
+                )
 
         # Polarization angle rotation
         for f1 in range(self.nfreqs):
@@ -839,7 +1012,7 @@ class BBCompSep(object):
                      ls=self.ell_b,
                      dls=model_cls)
             return
-        s = sacc.Sacc()
+        s = _Sacc()
         for tn in tr_names:
             t = self.s.tracers[tn]
             s.add_tracer('NuMap', tn, quantity='cmb_polarization',
@@ -848,10 +1021,8 @@ class BBCompSep(object):
                          map_unit='uK_CMB')
         for b1, b2, p1, p2, m1, m2, ind in self._freq_pol_iterator():
             cl = model_cls[:, m1, m2]
-            pol1 = self.pols[p1].lower()
-            pol2 = self.pols[p2].lower()
-            cltyp = f'cl_{pol1}{pol2}'
-            win = sacc.BandpowerWindow(self.bpw_l, self.windows[ind].T)
+            cltyp = self._cl_type(self.pols[p1], self.pols[p2])
+            win = _BandpowerWindow(self.bpw_l, self.windows[ind].T)
             s.add_ell_cl(cltyp, b1, b2, self.ell_b, cl, window=win)
 
         s.add_covariance(self.bbcovar)
@@ -918,6 +1089,14 @@ class BBCompSep(object):
             np.savez(self.output_dir+'/fisher.npz',
                      params=p0, fisher=fisher,
                      names=self.params.p_free_names)
+
+        elif self.config.get('sampler') == 'maximum_likelihood':
+            sampler = kwargs["params"]
+            chi2 = kwargs["chi2"]
+            print("Best fit:")
+            for n, p in zip(self.params.p_free_names, sampler):
+                print(n+" = %.3lE" % p)
+            print("Chi2: %.3lE" % chi2)
 
         elif self.config.get('sampler') == 'single_point':
             sampler = self.singlepoint()

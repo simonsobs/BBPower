@@ -8,7 +8,23 @@ from .fg_model import FGModel
 from .param_manager import ParameterManager
 from .bandpasses import (Bandpass, rotate_cells, rotate_cells_mat,
                          decorrelated_bpass)
-import sacc
+from .sacc_compat import NuMapSacc
+try:
+    import sacc
+    _Sacc = sacc.Sacc
+    _BandpowerWindow = sacc.BandpowerWindow
+except (ImportError, AttributeError):
+    from sacc.sacc import Sacc as _Sacc
+    from sacc.sacc import BandpowerWindow as _BandpowerWindow
+
+
+def _load_sacc_file(path):
+    try:
+        return _Sacc.load_fits(path)
+    except KeyError as err:
+        if "Unknown table type tracer:NuMap" in str(err):
+            return NuMapSacc.load_fits(path)
+        raise
 
 
 class BBCompSep(PipelineStage):
@@ -103,6 +119,20 @@ class BBCompSep(PipelineStage):
                         icl += 1
                         yield b1, b2, p1, p2, m1, m2, icl
 
+    def _normalize_pol(self, pol):
+        pol = str(pol).upper()
+        if pol in ('T', '0'):
+            return 'T'
+        if pol in ('E', 'B'):
+            return pol
+        raise ValueError("Unknown polarization channel %s" % pol)
+
+    def _sacc_pol(self, pol):
+        return {'T': '0', 'E': 'e', 'B': 'b'}[pol]
+
+    def _cl_type(self, pol1, pol2):
+        return 'cl_' + self._sacc_pol(pol1) + self._sacc_pol(pol2)
+
     def parse_sacc_file(self):
         """
         Reads the data in the sacc file included the power spectra,
@@ -112,25 +142,28 @@ class BBCompSep(PipelineStage):
         self.use_handl = self.config['likelihood_type'] == 'h&l'
 
         # Read data
-        self.s = sacc.Sacc.load_fits(self.get_input('cells_coadded'))
-        self.s_cov = sacc.Sacc.load_fits(self.get_input('cells_coadded_cov'))
+        self.s = _load_sacc_file(self.get_input('cells_coadded'))
+        self.s_cov = _load_sacc_file(self.get_input('cells_coadded_cov'))
         tr_comb = self.s.get_tracer_combinations()
-        for tr1, tr2 in tr_comb:
-            ind1 = self.s.indices(data_type='cl_bb', tracers=(tr1, tr2))
-            ind2 = self.s_cov.indices(data_type='cl_bb', tracers=(tr1, tr2))
-            assert np.all(ind1 == ind2), "Covariance sacc ordering is wrong"
-        if self.use_handl:
-            s_fid = sacc.Sacc.load_fits(self.get_input('cells_fiducial'))
-            s_noi = sacc.Sacc.load_fits(self.get_input('cells_noise'))
-
-        # Keep only desired correlations
-        self.pols = self.config['pol_channels']
-        corr_all = ['cl_ee', 'cl_eb', 'cl_be', 'cl_bb']
+        self.pols = [self._normalize_pol(p)
+                     for p in self.config['pol_channels']]
+        self.config['pol_channels'] = self.pols
+        corr_all = ['cl_00', 'cl_0e', 'cl_0b', 'cl_e0', 'cl_b0',
+                    'cl_ee', 'cl_eb', 'cl_be', 'cl_bb']
         corr_keep = []
         for m1 in self.pols:
             for m2 in self.pols:
-                clname = 'cl_' + m1.lower() + m2.lower()
-                corr_keep.append(clname)
+                corr_keep.append(self._cl_type(m1, m2))
+        for tr1, tr2 in tr_comb:
+            ind1 = self.s.indices(data_type=corr_keep[0], tracers=(tr1, tr2))
+            ind2 = self.s_cov.indices(data_type=corr_keep[0],
+                                      tracers=(tr1, tr2))
+            assert np.all(ind1 == ind2), "Covariance sacc ordering is wrong"
+        if self.use_handl:
+            s_fid = _load_sacc_file(self.get_input('cells_fiducial'))
+            s_noi = _load_sacc_file(self.get_input('cells_noise'))
+
+        # Keep only desired correlations
         for c in corr_all:
             if c not in corr_keep:
                 self.s.remove_selection(c)
@@ -171,11 +204,14 @@ class BBCompSep(PipelineStage):
             dnu[0] = nu[1] - nu[0]
             dnu[-1] = nu[-1] - nu[-2]
             bnu = t.bandpass
-            self.bpss.append(Bandpass(nu, dnu, bnu, i_t+1, self.config))
+            self.bpss.append(Bandpass(nu, dnu, bnu, i_t+1, self.config,
+                                      tracer_name=tn,
+                                      pol_order=self.pol_order))
 
         # Get ell sampling
         # Example power spectrum
-        self.ell_b, _ = self.s.get_ell_cl('cl_' + 2 * self.pols[0].lower(),
+        self.ell_b, _ = self.s.get_ell_cl(self._cl_type(self.pols[0],
+                                                        self.pols[0]),
                                           tr_names[0], tr_names[0])
         # Avoid l<2
         win0 = self.s.data[0]['window']
@@ -206,9 +242,7 @@ class BBCompSep(PipelineStage):
         for b1, b2, p1, p2, m1, m2, ind_vec in itr1:
             t1 = tr_names[b1]
             t2 = tr_names[b2]
-            pol1 = self.pols[p1].lower()
-            pol2 = self.pols[p2].lower()
-            cl_typ = f'cl_{pol1}{pol2}'
+            cl_typ = self._cl_type(self.pols[p1], self.pols[p2])
             ind_a = self.s.indices(cl_typ, (t1, t2))
             if len(ind_a) != self.n_bpws:
                 raise ValueError("All power spectra need to be "
@@ -223,9 +257,7 @@ class BBCompSep(PipelineStage):
             for b1b, b2b, p1b, p2b, m1b, m2b, ind_vecb in itr2:
                 t1b = tr_names[b1b]
                 t2b = tr_names[b2b]
-                pol1b = self.pols[p1b].lower()
-                pol2b = self.pols[p2b].lower()
-                cl_typb = f'cl_{pol1b}{pol2b}'
+                cl_typb = self._cl_type(self.pols[p1b], self.pols[p2b])
                 ind_b = self.s.indices(cl_typb, (t1b, t2b))
                 cv2d[:, ind_vec, :, ind_vecb] = self.s_cov.covariance.covmat[ind_a][:, ind_b]  # noqa: E501
 
@@ -257,16 +289,33 @@ class BBCompSep(PipelineStage):
         self.cmb_tens = np.zeros([self.npol, self.npol, nell])
         self.cmb_lens = np.zeros([self.npol, self.npol, nell])
         self.cmb_scal = np.zeros([self.npol, self.npol, nell])
-        if 'B' in self.config['pol_channels']:
-            ind = self.pol_order['B']
-            self.cmb_tens[ind, ind] = (cmb_bbfile[:, 3][mask] -
-                                       cmb_lensingfile[:, 3][mask])
-            self.cmb_lens[ind, ind] = cmb_lensingfile[:, 3][mask]
-        if 'E' in self.config['pol_channels']:
-            ind = self.pol_order['E']
-            self.cmb_tens[ind, ind] = (cmb_bbfile[:, 2][mask] -
-                                       cmb_lensingfile[:, 2][mask])
-            self.cmb_scal[ind, ind] = cmb_lensingfile[:, 2][mask]
+
+        def add_cmb(pol1, pol2, col, lensing_amplitude=False):
+            if ((pol1 not in self.pol_order) or
+                    (pol2 not in self.pol_order) or
+                    (cmb_bbfile.shape[1] <= col) or
+                    (cmb_lensingfile.shape[1] <= col)):
+                return
+            i1 = self.pol_order[pol1]
+            i2 = self.pol_order[pol2]
+            tens = cmb_bbfile[:, col][mask] - cmb_lensingfile[:, col][mask]
+            scal = cmb_lensingfile[:, col][mask]
+            self.cmb_tens[i1, i2] = tens
+            if lensing_amplitude:
+                self.cmb_lens[i1, i2] = scal
+            else:
+                self.cmb_scal[i1, i2] = scal
+            if i1 != i2:
+                self.cmb_tens[i2, i1] = tens
+                if lensing_amplitude:
+                    self.cmb_lens[i2, i1] = scal
+                else:
+                    self.cmb_scal[i2, i1] = scal
+
+        add_cmb('T', 'T', 1)
+        add_cmb('E', 'E', 2)
+        add_cmb('B', 'B', 3, lensing_amplitude=True)
+        add_cmb('T', 'E', 4)
         return
 
     def integrate_seds(self, params):
@@ -457,6 +506,14 @@ class BBCompSep(PipelineStage):
                                       (fg_scaling[c1, c1, f1, f1])**0.5) * cls_02[c1]  # noqa: E501
                     cls_array_fg[f1, f2] += cls
 
+        # Beam transfer
+        for f1 in range(self.nfreqs):
+            beam1 = self.bpss[f1].get_beam_profile(self.bpw_l, params)
+            for f2 in range(f1, self.nfreqs):
+                beam2 = self.bpss[f2].get_beam_profile(self.bpw_l, params)
+                cls_array_fg[f1, f2] *= beam1[:, None, None]
+                cls_array_fg[f1, f2] *= beam2[:, None, None]
+
         # Window convolution
         cls_array_list = np.zeros([self.n_bpws, self.nfreqs,
                                    self.npol, self.nfreqs,
@@ -474,6 +531,15 @@ class BBCompSep(PipelineStage):
                         cls_array_list[:, f1, p1, f2, p2] = clband
                         if m1 != m2:
                             cls_array_list[:, f2, p2, f1, p1] = clband
+
+        # Polarization efficiency
+        for f1 in range(self.nfreqs):
+            eff1 = self.bpss[f1].get_polarization_efficiency_vector(params)
+            for f2 in range(self.nfreqs):
+                eff2 = self.bpss[f2].get_polarization_efficiency_vector(params)
+                cls_array_list[:, f1, :, f2, :] *= (
+                    eff1[None, :, None] * eff2[None, None, :]
+                )
 
         # Polarization angle rotation
         for f1 in range(self.nfreqs):
@@ -781,7 +847,7 @@ class BBCompSep(PipelineStage):
                      ls=self.ell_b,
                      dls=model_cls)
             return
-        s = sacc.Sacc()
+        s = _Sacc()
         for it, tn in enumerate(tr_names):
             t = self.s.tracers[tn]
             s.add_tracer('NuMap', tn, quantity='cmb_polarization',
@@ -792,10 +858,8 @@ class BBCompSep(PipelineStage):
             cl = model_cls[:, m1, m2]
             t1 = tr_names[b1]
             t2 = tr_names[b2]
-            pol1 = self.pols[p1].lower()
-            pol2 = self.pols[p2].lower()
-            cltyp = f'cl_{pol1}{pol2}'
-            win = sacc.BandpowerWindow(self.bpw_l, self.windows[ind].T)
+            cltyp = self._cl_type(self.pols[p1], self.pols[p2])
+            win = _BandpowerWindow(self.bpw_l, self.windows[ind].T)
             s.add_ell_cl(cltyp, t1, t2, self.ell_b, cl, window=win)
         s.add_covariance(self.bbcovar)
         s.save_fits(self.get_output('output_dir')+'/cells_model.fits',
