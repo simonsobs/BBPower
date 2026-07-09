@@ -6,6 +6,7 @@ sys.path.append(
 )
 
 import fgcls as fgl  # noqa
+from spectrum_selection import use_cl_block  # noqa
 
 
 class FGModel:
@@ -93,10 +94,9 @@ class FGModel:
             comp['names_cl_dict'] = {}
             params_fgl = {}
             for k, d in component['cl_parameters'].items():
-                p1, p2 = k
                 # Add parameters only if we're using both polarization channels
-                if ((p1 in config['pol_channels']) and
-                        (p2 in config['pol_channels'])):
+                # and the block can contribute to the selected spectra.
+                if use_cl_block(k, config):
                     comp['names_cl_dict'][k] = {}
                     params_fgl[k] = {}
                     for n, l in d.items():
@@ -122,10 +122,9 @@ class FGModel:
             # Set Cl functions
             comp['cl'] = {}
             for k, c in component['cl'].items():
-                p1, p2 = k
                 # Add parameters only if we're using both polarization channels
-                if ((p1 in config['pol_channels']) and
-                        (p2 in config['pol_channels'])):
+                # and the block can contribute to the selected spectra.
+                if use_cl_block(k, config):
                     cl_fnc = get_function(fgl, c)
                     comp['cl'][k] = cl_fnc(**(params_fgl[k]))
             self.components[key] = comp

@@ -1,4 +1,5 @@
 import numpy as np
+from spectrum_selection import use_cl_block
 
 
 class ParameterManager(object):
@@ -59,11 +60,10 @@ class ParameterManager(object):
             dc = c.get('cl_parameters')
             if dc:  # Power spectra
                 for cl_name, d in dc.items():
-                    p1, p2 = cl_name
                     # Add parameters only if we're using both
-                    # polarization channels
-                    if ((p1 in config['pol_channels']) and
-                            (p2 in config['pol_channels'])):
+                    # polarization channels and the block can contribute
+                    # to the selected spectra.
+                    if use_cl_block(cl_name, config):
                         self._add_parameters(d)
 
             dm = c.get('moments')

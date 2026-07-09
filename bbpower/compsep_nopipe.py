@@ -21,6 +21,10 @@ from param_manager import ParameterManager  # noqa
 from bandpasses import (Bandpass, rotate_cells, rotate_cells_mat,  # noqa
                         decorrelated_bpass)
 from sacc_compat import NuMapSacc  # noqa
+from spectrum_selection import (normalize_spectrum_label,
+                                normalize_spectrum_rules,
+                                rule_matches,
+                                selected_spectra_from_config)
 
 
 def _load_sacc_file(path):
@@ -206,8 +210,8 @@ class BBCompSep(object):
     def _freq_pol_iterator(self):
         icl = -1
         map_sets = list(self.config["map_sets"])
-        fit_spectra = getattr(self, 'fit_spectra', None)
         include_planck_auto = getattr(self, 'include_planck_auto', True)
+        include_sat_auto = getattr(self, 'include_sat_auto', True)
         for b1 in range(len(map_sets)):
             for p1 in range(self.npol):
                 m1 = p1 + self.npol * b1
@@ -216,13 +220,18 @@ class BBCompSep(object):
                             self._is_planck_tracer(map_sets[b1]) and
                             self._is_planck_tracer(map_sets[b2])):
                         continue
+                    if ((not include_sat_auto) and
+                            self._is_sat_tracer(map_sets[b1]) and
+                            self._is_sat_tracer(map_sets[b2])):
+                        continue
                     if b1 == b2:
                         p2_r = range(p1, self.npol)
                     else:
                         p2_r = range(self.npol)
                     for p2 in p2_r:
                         spec = self.pols[p1] + self.pols[p2]
-                        if fit_spectra is not None and spec not in fit_spectra:
+                        if not self._is_selected_spectrum(
+                                map_sets[b1], map_sets[b2], spec):
                             continue
                         m2 = p2 + self.npol * b2
                         icl += 1
@@ -230,6 +239,17 @@ class BBCompSep(object):
 
     def _is_planck_tracer(self, tracer):
         return str(tracer).lower().startswith('planck')
+
+    def _is_sat_tracer(self, tracer):
+        return str(tracer).lower().startswith('sat')
+
+    def _is_selected_spectrum(self, tracer1, tracer2, spec):
+        rules = getattr(self, 'fit_spectrum_rules', [])
+        if rules:
+            return any(rule_matches(rule, tracer1, tracer2, spec)
+                       for rule in rules)
+        fit_spectra = getattr(self, 'fit_spectra', None)
+        return fit_spectra is None or spec in fit_spectra
 
     def _normalize_pol(self, pol):
         pol = str(pol).upper()
@@ -246,11 +266,7 @@ class BBCompSep(object):
         return 'cl_' + self._sacc_pol(pol1) + self._sacc_pol(pol2)
 
     def _normalize_spectrum_label(self, spec):
-        spec = str(spec).lower().replace('cl_', '')
-        spec = spec.replace('0', 't')
-        if len(spec) != 2:
-            raise ValueError("Spectrum labels must have two fields")
-        return ''.join(self._normalize_pol(p) for p in spec)
+        return normalize_spectrum_label(spec)
 
     def parse_sacc_file(self):
         """
@@ -283,27 +299,27 @@ class BBCompSep(object):
         self.pols = [self._normalize_pol(p)
                      for p in self.config['pol_channels']]
         self.config['pol_channels'] = self.pols
+        self.fit_spectrum_rules = normalize_spectrum_rules(self.config)
         self.fit_spectra = None
-        if self.config.get('fit_spectra') is not None:
+        if ((not self.fit_spectrum_rules) and
+                self.config.get('fit_spectra') is not None):
             self.fit_spectra = [
                 self._normalize_spectrum_label(s)
                 for s in self.config['fit_spectra']
             ]
+        self.selected_spectra = selected_spectra_from_config(self.config)
         self.include_planck_auto = self.config.get(
             'include_planck_auto', True
         )
+        self.include_sat_auto = self.config.get(
+            'include_sat_auto', True
+        )
         corr_all = ['cl_00', 'cl_0e', 'cl_0b', 'cl_e0', 'cl_b0',
                     'cl_ee', 'cl_eb', 'cl_be', 'cl_bb']
-        if self.fit_spectra is None:
-            corr_keep = []
-            for m1 in self.pols:
-                for m2 in self.pols:
-                    corr_keep.append(self._cl_type(m1, m2))
-        else:
-            corr_keep = [
-                self._cl_type(spec[0], spec[1])
-                for spec in self.fit_spectra
-            ]
+        corr_keep = [
+            self._cl_type(spec[0], spec[1])
+            for spec in self.selected_spectra
+        ]
         corr_keep = list(dict.fromkeys(corr_keep))
         if not corr_keep:
             raise ValueError("No spectra selected for the likelihood")
@@ -849,7 +865,6 @@ class BBCompSep(object):
         Sample the model with MCMC.
         """
         import emcee  # noqa
-        from multiprocessing import Pool
 
         fname_temp = self.output_dir + '/emcee.npz.h5'
         backend = emcee.backends.HDFBackend(fname_temp)
@@ -874,15 +889,16 @@ class BBCompSep(object):
                    for i in range(nwalkers)]
             nsteps_use = n_iters
 
-        with Pool() as pool:  # noqa
-            import time
-            start = time.time()
-            sampler = emcee.EnsembleSampler(nwalkers, ndim,
-                                            self.lnprob,
-                                            backend=backend)
-            if nsteps_use > 0:
-                sampler.run_mcmc(pos, nsteps_use, store=True, progress=True)
-                end = time.time()
+        import time
+        start = time.time()
+        sampler = emcee.EnsembleSampler(nwalkers, ndim,
+                                        self.lnprob,
+                                        backend=backend)
+        if nsteps_use > 0:
+            sampler.run_mcmc(pos, nsteps_use, store=True, progress=True)
+            end = time.time()
+        else:
+            end = start
 
         return sampler, end-start
 
