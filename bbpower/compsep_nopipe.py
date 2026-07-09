@@ -194,6 +194,38 @@ class BBCompSep(object):
             )
             return
 
+        if mode in ('ell_band', 'band', 'banded'):
+            nband = int(self.config.get('covariance_ell_band', 0))
+            if nband < 0:
+                raise ValueError("covariance_ell_band must be non-negative")
+            # The flattened vector is ordered [n_bpws, ncross], so the
+            # bandpower bin is the slow index: keep all spectrum-spectrum
+            # correlations within +-nband ell bins, zero the rest.
+            bpw_idx = np.arange(len(cov)) // self.ncross
+            keep = np.abs(bpw_idx[:, None] - bpw_idx[None, :]) <= nband
+            cov = np.where(keep, cov, 0.)
+            # Zeroing entries can break positive-definiteness, so floor the
+            # eigenvalues before inverting.
+            eigvals, eigvecs = np.linalg.eigh(cov)
+            max_eval = np.max(eigvals)
+            floor = max(
+                float(self.config.get('covariance_band_eig_floor_abs', 0.)),
+                float(self.config.get('covariance_band_eig_floor_rel', 1.e-12))
+                * max_eval,
+            )
+            if floor <= 0:
+                raise ValueError("Banded covariance eigenvalue floor "
+                                 "must be positive")
+            n_floored = int(np.sum(eigvals < floor))
+            eigvals = np.clip(eigvals, floor, None)
+            self.bbcovar = (eigvecs * eigvals).dot(eigvecs.T)
+            self.invcov = (eigvecs / eigvals).dot(eigvecs.T)
+            print(
+                "Using ell-banded covariance "
+                f"(band={nband}, floored eigenvalues={n_floored})"
+            )
+            return
+
         if mode == 'full':
             self.bbcovar = cov
             self.invcov = np.linalg.solve(
@@ -203,8 +235,8 @@ class BBCompSep(object):
             return
 
         raise ValueError(
-            "Unknown covariance_mode. Use 'full', 'diagonal', or "
-            "'eigenvalue_clip'."
+            "Unknown covariance_mode. Use 'full', 'diagonal', "
+            "'eigenvalue_clip', or 'ell_band'."
         )
 
     def _freq_pol_iterator(self):
