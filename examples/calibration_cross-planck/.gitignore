@@ -1,0 +1,8 @@
+# Run products. Chains are ~50 MB and everything under outputs/ is
+# reproducible from the config plus the SACC file, so none of it is tracked.
+*/outputs/
+
+# Editor and interpreter debris
+__pycache__/
+*.pyc
+.ipynb_checkpoints/

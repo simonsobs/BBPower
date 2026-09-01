@@ -1,0 +1,231 @@
+# =====================================================================
+#  Cross-calibration of SATp1 against Planck  --  SAT1 south, science
+#
+#  Fitted per bandpass:  gain g_i, polarisation efficiency eps_i,
+#                        rotation angle psi_i  [deg]
+#  Fitted globally:      power-law thermal dust, D_ell = A (l/l0)^alpha f_i f_j
+#
+#  C^obs_ij = R_i(psi_i) P_i [C^CMB + C^dust_ij] P_j R_j^T(psi_j)
+#  P_i = g_i diag(1, eps_i, eps_i)
+#
+#  Planck is the calibration reference: its g, eps, psi are held fixed, so
+#  the SAT parameters are measured *relative to Planck* through the
+#  SAT x Planck cross-spectra.  See README.md.
+#
+#  Run:  ./run_satp1.sh          (or ./run_satp1.sh minimize)
+# =====================================================================
+
+output_dir: /home/ccaimapo/SimonsObs/BBPower/examples/calibration_cross-planck/satp1/outputs/fiducial_planck18_100-400
+
+data:
+    sacc_file: /scratch/gpfs/SIMONSOBS/sat-iso/v4_paper/spectra/satp1/south/20260702_full-dataset_cross-Planck/science_msk60SMICAblob/saccs/cl_and_cov_sacc.fits
+
+# ---------------------------------------------------------------- scales
+# Bandpowers are 15 wide with centres at 7, 22, 37, ...; l = 105..400 keeps
+# the 20 bins centred from 112 to 397. The low cut matches the SATp1 null
+# tests (which run 105..495); the upper cut is tighter than theirs.
+#
+# l_min = 105 deliberately excludes the bins at 67 and 82, where SAT x
+# Planck TT is not trustworthy: the SAT filtering drives the data/theory
+# ratio to 0.42 at f090 and to -1.19 (i.e. NEGATIVE) at f150 near l = 67,
+# and those bins pull directly on the gains. Earlier runs at l_min = 60
+# included them. Pushing lower also costs positive-definiteness in the
+# covariance -- the code raises rather than inverting a bad matrix.
+l_min: 105
+l_max: 400
+
+# ------------------------------------------------------------- sampling
+sampler: emcee          # single_point | timing | minimize | fisher | emcee
+nwalkers: 48
+n_iters: 6000
+n_threads: 1
+seed: 1234
+resume: False
+
+# ------------------------------------------------------------------ CMB
+# Fiducial lensed spectra, held fixed: this is the absolute calibrator, so
+# the gains are measured against exactly this cosmology.
+#
+# Using camb_lens_nobb_planck2018.dat -- lensed scalar spectra, r = 0, so
+# lensing BB and no primordial BB. Generated with CAMB at the Planck 2018
+# VI Table 2 TT,TE,EE+lowE+lensing marginalised means:
+#
+#     H0 = 67.36     ombh2 = 0.02237   omch2 = 0.1200
+#     tau = 0.0544   As = 2.100e-9     ns = 0.9649    mnu = 0.06 eV
+#
+# Columns are ell, D_TT, D_EE, D_BB, D_TE with ell = 1..1950, matching the
+# other camb_lens_*.dat files in examples/data row for row -- which matters
+# if you ever pair it with camb_lens_r1.dat under stock BBCompSep, since
+# load_cmb builds its mask from one template and applies it POSITIONALLY to
+# the other. The full parameter set is in the file header.
+#
+# The alternative in that directory, camb_lens_nobb.dat, is at a different
+# (unrecorded) cosmology: its D_TT runs 4.5-5% high across the fitted range
+# -- ratio 1.052 at l = 100, 1.045 at l = 220, 1.029 at l = 500 -- and its
+# low-l EE differs by far more, which is a different optical depth.
+#
+# MEASURED effect of that difference, from running the identical fit with
+# both templates (Planck 2018 second): the calibration parameters barely
+# move, but the chi2 is much worse with camb_lens_nobb.dat.
+#
+#     g_90    0.8587 +/- 0.0081   vs  0.8587 +/- 0.0085   (0.0 sigma)
+#     eps_90  0.8479 +/- 0.0127   vs  0.8536 +/- 0.0133   (0.4 sigma)
+#     g_150   0.9325 +/- 0.0141   vs  0.9321 +/- 0.0148   (0.0 sigma)
+#     eps_150 0.9154 +/- 0.0169   vs  0.9222 +/- 0.0177   (0.4 sigma)
+#     chi2    1299.7 / 1141        vs  1231.5 / 1141
+#     PTE     0.0007               vs  0.031
+#
+# It is tempting to expect the gains to absorb a rescaled theory, since the
+# SAT x Planck TT model is g_SAT * C^TT and so linear in g_SAT. They do not.
+# A cosmology error is common to EVERY spectrum, while the gains are not
+# free to follow it: Planck's g and eps are pinned at 1, so the Planck
+# auto-spectra have no freedom at all, and each SAT gain is constrained
+# simultaneously through TT and TE (which go as g) and through ET and EE
+# (which go as g*eps). No single rescaling of g satisfies all of them, so
+# the mismatch surfaces as residual instead of as a parameter shift.
+#
+# So the calibration is robust to a percent-level cosmology error, and it
+# is the chi2, not the best fit, that tells you whether the fiducial
+# spectra are right. That is why this config uses Planck 2018: the data
+# clearly prefers it, and every badly-fitting spectrum under the other
+# template involved T.
+#
+# To test the dependence yourself, point cl_file at any other CAMB output
+# with the same column order. load_cmb indexes by the ell column, so the
+# starting multipole and lmax need not match, as long as lmax covers the
+# bandpower windows (800 here).
+cmb:
+    cl_file: /home/ccaimapo/SimonsObs/BBPower/examples/data/camb_lens_nobb_planck2018.dat
+    A_lens: ['fixed', [1.0]]
+
+# ------------------------------------------------------------- map sets
+# `group` drives the spectrum selection below; `alias` names the parameters.
+# Priors:  ['fixed', [v]] | ['tophat', [lo, start, hi]] | ['Gaussian', [mu, sigma]]
+map_sets:
+
+    SATp1_f090_south_science:
+        alias:  sat_f090
+        group:  sat
+        gain:   ['tophat', [0.5, 1.00, 1.5]]
+        poleff: ['tophat', [0.5, 1.00, 1.5]]
+        angle:  ['tophat', [-15., 0.0, 15.]]
+
+    SATp1_f150_south_science:
+        alias:  sat_f150
+        group:  sat
+        gain:   ['tophat', [0.5, 1.00, 1.5]]
+        poleff: ['tophat', [0.5, 1.00, 1.5]]
+        angle:  ['tophat', [-15., 0.0, 15.]]
+
+    # --- Planck: the reference. Everything fixed. ---------------------
+    # To let Planck float instead, swap in e.g.
+    #     gain: ['Gaussian', [1.0, 0.003]]
+    # but note g_353 is degenerate with the dust amplitudes (f_353 = 1 by
+    # construction), so keep that one fixed.
+    Planck_f100_filtered_satp1_f090_south_science:
+        alias:  planck_f100
+        group:  planck
+        gain:   ['fixed', [1.0]]
+        poleff: ['fixed', [1.0]]
+        angle:  ['fixed', [0.0]]
+
+    Planck_f143_filtered_satp1_f090_south_science:
+        alias:  planck_f143
+        group:  planck
+        gain:   ['fixed', [1.0]]
+        poleff: ['fixed', [1.0]]
+        angle:  ['fixed', [0.0]]
+
+    # 353 sits in its own group so its spectra can be restricted to
+    # polarisation. Its TT carries several hundred muK^2 of CIB + point
+    # sources on top of the CMB, it contributes nothing to the calibration,
+    # and modelling it would mean carrying a TT foreground term that is
+    # pointless everywhere else. Its job here is polarisation: pinning
+    # A_d_EE and giving beta_d a lever.
+    Planck_f353_filtered_satp1_f090_south_science:
+        alias:  planck_f353
+        group:  planck353
+        gain:   ['fixed', [1.0]]
+        poleff: ['fixed', [1.0]]
+        angle:  ['fixed', [0.0]]
+
+# -------------------------------------------------------- data selection
+# Keys are the two groups joined alphabetically by '_x_'.
+# For an auto-pair (same map set twice) the transposed spectra ET/BE/BT are
+# numerically identical to TE/EB/TB, so they are dropped automatically --
+# keeping both would make the covariance singular.
+# Groups: sat = {f090, f150}, planck = {100, 143}, planck353 = {353}.
+# A pair whose key is absent from pair_types is dropped entirely, which is
+# how 100x143 stays out of TT (it is CMB-dominated and adds nothing here).
+spectra_selection:
+    pair_types:
+        # TT/TE live only where dust is negligible: 100 and 143. This is
+        # what makes fitting a dust TT term unnecessary.
+        #
+        # TT is dropped from the Planck autos. With Planck's g, eps and psi
+        # all pinned at 1, 1, 0 and no dust TT term, those two spectra
+        # (100x100 and 143x143 -- 100x143 is already excluded below) contain
+        # no free parameter whatsoever: the model cannot move to fit them,
+        # by construction. They constrain nothing and only add residual, and
+        # they were the two largest chi2 contributors in every run so far
+        # (3.09 and 2.88 per bandpower against camb_lens_nobb, 2.07 and 1.93
+        # against Planck 2018).
+        #
+        # This is a deliberate scope choice, not a fix: it removes a
+        # consistency check of the fiducial CMB against Planck on this mask,
+        # so the improved PTE answers a narrower question than before. Put
+        # 'TT' back to recover that check.
+        planck_x_planck:       ['TE', 'ET', 'EE', 'EB']              # 100x100, 143x143
+        planck_x_sat:          ['TT', 'TE', 'ET', 'EE', 'EB', 'BE']  # SAT x 100, x 143
+        # 353: polarisation only, everywhere it appears.
+        planck353_x_sat:       ['EE', 'EB', 'BE']                    # SAT x 353
+        planck_x_planck353:    ['EE', 'EB', 'BE']                    # 100x353, 143x353
+        planck353_x_planck353: ['EE', 'EB']                          # 353 auto
+        sat_x_sat:             ['EB', 'BE']                          # angles only
+    # false -> drop 100x143. The 353 cross-frequency pairs are kept via
+    # planck_x_planck353 above; they are the real constraint on beta_d.
+    include_cross_within_group:
+        planck: false
+        sat:    true          # keeps SAT f090 x f150 EB and BE
+
+# ----------------------------------------------------------------- dust
+# D_ell^{d,XX}_ij = A_d^XX (ell/ell0)^{alpha_d^XX} f_i^d f_j^d
+# f^d is the bandpass-integrated MBB in K_CMB, normalised to 1 at nu0.
+# Start values are read off the Planck 353 auto-spectra on this mask.
+dust:
+    nu0:    353.
+    ell0:   80.
+    # MBB spectral index, fitted with a Planck-2018-centred prior. Its lever
+    # arm is the dust EE ratio across 100, 143, 353 and the SAT bands, which
+    # comes mostly from the 100x353 and 143x353 EE pairs -- those are kept
+    # (planck_x_planck353 in the selection above) precisely for this.
+    beta_d: ['Gaussian', [1.54, 0.2]]
+    temp_d: ['fixed', [20.0]]
+    # Only EE is fitted. No dust TT or TE term is needed, because TT/TE are
+    # only fitted on 100 and 143, where dust is negligible: it scales as
+    # f_i f_j and f falls ~30x between 353 and 143, so the ~1000 muK^2 at
+    # 353 becomes order 1 muK^2 against ~5000 muK^2 of CMB.
+    #
+    # This only holds while 353 stays out of TT/TE. The Planck 353 auto sits
+    # 470-1380 muK^2 above the lensed-CMB TT prediction over l = 67-142 on
+    # this mask, and that excess RISES with l (a free power law fitted
+    # alpha = +0.73), so it is CIB + point sources, not dust. If you ever put
+    # TT back on a 353 pair, you need a term for it -- and a rising one.
+    spectra:
+        EE:
+            amp:   ['tophat', [0., 12., 'inf']]
+            alpha: ['tophat', [-3., -0.4, 2.]]
+        # Dust BB is NOT fitted: constraining it would need SAT x SAT BB,
+        # which is deliberately excluded here. With no BB spectrum in the
+        # data vector, dust BB reaches the likelihood only through the EB
+        # leakage sin(4 psi) (BB - EE); sweeping A_d_BB from 0 to 20 muK^2
+        # moves the total chi2 by < 0.32, so left free it just walks into a
+        # prior wall. Held at the Planck 353 values measured on this mask.
+        BB:
+            amp:   ['fixed', [5.0]]
+            alpha: ['fixed', [-0.4]]
+        # Dust EB is assumed zero. Uncomment to fit it -- but note it is
+        # strongly degenerate with the rotation angles.
+        # EB:
+        #     amp:   ['tophat', [-100., 0., 100.]]
+        #     alpha: ['tophat', [-3., -0.4, 2.]]
