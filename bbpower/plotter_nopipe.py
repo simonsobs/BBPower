@@ -144,7 +144,7 @@ class BBPlotter(object):
     def add_coadded(self):
         (do_best, do_fid, do_cross,
          do_tot, do_noise) = (
-            self.best_fit is not None,
+            self.s_best is not None,
             self.s_fid is not None,
             self.s_cd_x is not None,
             self.s_cd_t is not None,
@@ -412,7 +412,8 @@ class BBPlotter(object):
         # Load relevant sacc files for plotting
         for cl, sc in saccs_dict.items():
             setattr(self, sc, None)
-            if self.data[cl] is None:
+            if cl not in self.data or self.data[cl] is None:
+                self.data[cl] = None
                 print(cl, "is None")
                 continue
             data = self.data[cl].format(sim_id=self.sim_id)
@@ -483,7 +484,7 @@ class BBPlotter(object):
             self.add_nulls()
         if self.config['plot_likelihood']:
             self.add_contours()
-        self.write_page()
+        # self.write_page()
 
 
 def main(args):

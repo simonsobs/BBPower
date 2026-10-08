@@ -9,5 +9,5 @@ bbpower_dir=.  ## PATH TO YOUR LOCAL BBPOWER
 cd $basedir
 
 bbpower_config=${basedir}/examples/config_nopipe.yml
-python -u ${bbpower_dir}/bbpower/compsep_nopipe.py --config $bbpower_config
-python -u ${bbpower_dir}/bbpower/plotter_nopipe.py --config $bbpower_config
+srun python -u ${bbpower_dir}/bbpower/compsep_nopipe.py --config $bbpower_config
+srun python -u ${bbpower_dir}/bbpower/plotter_nopipe.py --config $bbpower_config

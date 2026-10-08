@@ -681,18 +681,17 @@ class BBCompSep(object):
             invcov = self.invcov_ell[i_bpw]
             if self.use_handl:
                 dx = self.h_and_l_dx(params).reshape(shape)[i_bpw]
-                if np.any(np.isinf(dx)):
-                    return -np.inf
             else:
                 dx = self.chi_sq_dx(params).reshape(shape)[i_bpw]
 
         else:
             if self.use_handl:
                 dx = self.h_and_l_dx(params)
-                if np.any(np.isinf(dx)):
-                    return -np.inf
             else:
                 dx = self.chi_sq_dx(params)
+
+        if np.any(np.isinf(dx)):
+            return -np.inf
         like = -0.5 * dx @ invcov @ dx
 
         return like

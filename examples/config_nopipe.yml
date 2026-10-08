@@ -1,5 +1,6 @@
 # These parameters are accessible to all stages
-chains_dir: &chains_dir /scratch/gpfs/SIMONSOBS/users/kw6905/sat-iso/v1/bbpower/sat_rotated_wmap_planck_20260217/fiducial_model_Alens  ## YOUR OUTPUT DIRECTORY
+# chains_dir: &chains_dir /scratch/gpfs/SIMONSOBS/users/kw6905/sat-iso/v1/bbpower/sat_rotated_wmap_planck_20260217/fiducial_model_Alens  ## YOUR OUTPUT DIRECTORY
+chains_dir: &chains_dir /home/kw6905/bbdev/BBPower/f2f_2026/sat_rotated_wmap_planck_20260217
 covar_sacc: &covar_sacc /scratch/gpfs/SIMONSOBS/external_data_e2e/v1/cl_and_cov_sacc_rotated.fits
 
 global:
@@ -88,7 +89,7 @@ BBCompSep:
     nrepeat: 50
     # If you chose emcee:
     nwalkers: 48
-    n_iters: 5000
+    n_iters: 1000
     # Resume sampling from earlier runs
     resume: False
     # Whether to write model best fits into sacc (otherwise into npz archive)
