@@ -94,12 +94,15 @@ class ParameterManager(object):
         }
 
         if component != "all":
+            comps = ["dust", "synch", "cmb"]
             if component not in ["dust", "synch", "cmb"]:
                 raise ValueError(
                     "Only 'dust', 'synch', and 'cmb' are valid components.")
-            for p in comp_params[component]:
-                if p in params:
-                    params[p] = 0.
+            comps.remove(component)
+            for comp in comps:
+                for p in comp_params[comp]:
+                    if p in params:
+                        params[p] = 0.
         return params
 
     def lnprior(self, par):
