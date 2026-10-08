@@ -34,7 +34,7 @@ def main(args):
     nbands = len(map_sets)
     fn_sacc = config['global']['data']['cells_coadded']
 
-    fig, axes = plt.subplots(len(map_sets), 1, figsize=(5, 15))
+    fig, axes = plt.subplots(len(map_sets), 1, figsize=(5, 2.5*nbands))
     for i_map_set in range(nbands):
         ax = axes[i_map_set]
         tr = map_sets[i_map_set]
@@ -86,7 +86,8 @@ def main(args):
     chains_0 = np.load(chains_fn.format(i_bpw=1))
     npar = len(chains_0["names"])
 
-    fig, axes = plt.subplots(npar, nbands, figsize=(15, 8), sharex=True)
+    fig, axes = plt.subplots(npar, nbands, figsize=(3*nbands, npar*2),
+                             sharex=True)
 
     for i_map_set in range(nbands):
         tr = map_sets[i_map_set]
@@ -105,7 +106,7 @@ def main(args):
                 c=plt.get_cmap("tab10")(ipar))
             if i_map_set == 0:
                 axes[ipar, i_map_set].set_ylabel(par)
-            axes[ipar, i_map_set].set_title(tr, y=0.9, va="top")
+            axes[ipar, i_map_set].set_title(tr, y=0.9, va="top", fontsize=7)
         axes[-1, i_map_set].set_xlabel(r"$\ell$")
 
     fig.align_ylabels()
