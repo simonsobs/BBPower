@@ -49,6 +49,15 @@ class BBCompSep(object):
         setattr(self, "config_fname", getattr(args, "config"))
         setattr(self, "data", self.config["data"])
 
+        # Decide whether to apply a per-bandpower amplitude model, (default no)
+        self.do_bandpowers = False
+        if hasattr(self.config, "per_bandpower_model"):
+            self.do_bandpowers = self.config["per_bandpower_model"]
+        setattr(
+            self,
+            "per_bandpower_model",
+            self.config["per_bandpower_model"])
+
     def setup_compsep(self):
         """
         Pre-load the data, CMB BB power spectrum, and foreground models.
@@ -278,7 +287,13 @@ class BBCompSep(object):
                                       np.identity(len(self.bbcovar)))
         np.savez(self.output_dir + '/data_ell_cl_invcov.npz',
                  ell=self.ell_b, cl=self.bbdata, invcov=self.invcov)
-        return
+
+        if self.per_bandpower_model:
+            self.invcov_ell = np.zeros([self.n_bpws, self.ncross, self.ncross]) 
+            for ell in range(self.n_bpws):
+                invcov = np.linalg.solve(cv2d[ell, :, ell, :],
+                                         np.identity(self.ncross))
+                self.invcov_ell[ell] += invcov
 
     def load_cmb(self):
         """
@@ -646,7 +661,7 @@ class BBCompSep(object):
             rot[:, i] = U[:, i] * d
         return rot.dot(U.T)
 
-    def lnprob(self, par):
+    def lnprob(self, par, i_bpw=None):
         """
         Likelihood with priors.
         """
@@ -654,31 +669,46 @@ class BBCompSep(object):
         if not np.isfinite(prior):
             return -np.inf
 
-        return prior + self.lnlike(par)
+        return prior + self.lnlike(par, i_bpw)
 
-    def lnlike(self, par):
+    def lnlike(self, par, i_bpw=None):
         """
         Likelihood without priors.
         """
         params = self.params.build_params(par)
-        if self.use_handl:
-            dx = self.h_and_l_dx(params)
-            if np.any(np.isinf(dx)):
-                return -np.inf
+        invcov = self.invcov
+        if self.per_bandpower_model:
+            shape = (self.n_bpws, self.ncross)
+            invcov = self.invcov_ell[i_bpw]
+            if self.use_handl:
+                dx = self.h_and_l_dx(params).reshape(shape)[i_bpw]
+                if np.any(np.isinf(dx)):
+                    return -np.inf
+            else:
+                dx = self.chi_sq_dx(params).reshape(shape)[i_bpw]
+
         else:
-            dx = self.chi_sq_dx(params)
-        like = -0.5 * np.dot(dx, np.dot(self.invcov, dx))
+            if self.use_handl:
+                dx = self.h_and_l_dx(params)
+                if np.any(np.isinf(dx)):
+                    return -np.inf
+            else:
+                dx = self.chi_sq_dx(params)
+        like = -0.5 * dx @ invcov @ dx
 
         return like
 
-    def emcee_sampler(self):
+    def emcee_sampler(self, i_bpw=None):
         """
         Sample the model with MCMC.
         """
         import emcee  # noqa
         from multiprocessing import Pool
 
-        fname_temp = self.output_dir + '/emcee.npz.h5'
+        if i_bpw is not None:
+            fname_temp = self.output_dir + f'/emcee_bpw{int(i_bpw):02}.npz.h5'
+        else:
+            fname_temp = self.output_dir + '/emcee.npz.h5'
         backend = emcee.backends.HDFBackend(fname_temp)
 
         nwalkers = self.config['nwalkers']
@@ -701,11 +731,18 @@ class BBCompSep(object):
                    for i in range(nwalkers)]
             nsteps_use = n_iters
 
+        # Per-bandpower model
+        if self.per_bandpower_model:
+            def lnprob(par):
+                return self.lnprob(par, i_bpw)
+        else:
+            lnprob = self.lnprob
+
         with Pool() as pool:  # noqa
             import time
             start = time.time()
             sampler = emcee.EnsembleSampler(nwalkers, ndim,
-                                            self.lnprob,
+                                            lnprob,
                                             backend=backend)
             if nsteps_use > 0:
                 sampler.run_mcmc(pos, nsteps_use, store=True, progress=True)
@@ -713,7 +750,7 @@ class BBCompSep(object):
 
         return sampler, end-start
 
-    def polychord_sampler(self):
+    def polychord_sampler(self, i_bpw=None):
         """
         Sample the model with PolyChord nested sampler.
         """
@@ -723,9 +760,10 @@ class BBCompSep(object):
         ndim = len(self.params.p0)
         nder = 0
 
-        # Log-likelihood compliant with PolyChord's input
-        def likelihood(theta):
-            return self.lnlike(theta), [0]
+        # Per-bandpower model
+        if self.per_bandpower_model:
+            def likelihood(theta):
+                return self.lnlike(theta, i_bpw), [0]
 
         def prior(hypercube):
             prior = []
@@ -748,7 +786,10 @@ class BBCompSep(object):
         settings = PolyChordSettings(ndim, nder)
         settings.base_dir = self.output_dir + '/polychord'
         os.makedirs(settings.base_dir, exist_ok=True)
-        settings.file_root = 'pch'
+        if i_bpw is not None:
+            settings.file_root = f'pch_bpw{int(i_bpw):02}'
+        else:
+            settings.file_root = 'pch'
         settings.nlive = self.config['nlive']
         settings.num_repeats = self.config['nrepeat']
         settings.do_clustering = False  # Assume unimodal posterior
@@ -763,20 +804,20 @@ class BBCompSep(object):
 
         return output
 
-    def minimizer(self):
+    def minimizer(self, i_bpw=None):
         """
         Find maximum posterior value
         """
         from scipy.optimize import minimize  # noqa
 
         def chi2(par):
-            c2 = -2*self.lnprob(par)
+            c2 = -2*self.lnprob(par, i_bpw)
             return c2
 
         res = minimize(chi2, self.params.p0, method="Powell")
         return res.x
 
-    def fisher(self):
+    def fisher(self, i_bpw=None):
         """
         Evaluate Fisher matrix (corresponding to the posterior distribution)
         """
@@ -784,13 +825,13 @@ class BBCompSep(object):
         from scipy.optimize import minimize  # noqa
 
         def chi2(par):
-            c2 = -2*self.lnprob(par)
+            c2 = -2*self.lnprob(par, i_bpw)
             return c2
 
         res = minimize(chi2, self.params.p0, method="Powell")
 
         def lnprobd(p):
-            ll = self.lnprob(p)
+            ll = self.lnprob(p, i_bpw)
             if ll == -np.inf:
                 ll = -1E100
             return ll
@@ -798,66 +839,85 @@ class BBCompSep(object):
         fisher = - nd.Hessian(lnprobd)(res.x)
         return res.x, fisher
 
-    def singlepoint(self):
+    def singlepoint(self, i_bpw=None):
         """
         Evaluate at a single point
         """
-        chi2 = -2 * self.lnprob(self.params.p0)
+        chi2 = -2 * self.lnprob(self.params.p0, i_bpw)
         return chi2
 
-    def timing(self, n_eval=300):
+    def timing(self, n_eval=300, i_bpw=None):
         """
         Evaluate n times and benchmark
         """
         import time
         start = time.time()
         for i in range(n_eval):
-            self.lnprob(self.params.p0)
+            self.lnprob(self.params.p0, i_bpw)
         end = time.time()
 
         return end-start, (end-start)/n_eval
 
     def predicted_spectra(self, at_min=True, save_npz=True):
         """
-        Evaluates model at a the maximum likelihood and
-        writes predicted spectra into a numpy array
+        Evaluates model for all and for each individual component at
+        the global best fit and writes predicted spectra into a numpy array
         with shape (nbpws, nmaps, nmaps).
         """
-        if at_min:
-            sampler = self.minimizer()
-            p = np.array(sampler)
-        else:
-            p = self.params.p0
-        pars = self.params.build_params(p)
-        model_cls = self.model(pars)
-        print("model_cls", model_cls.shape)
         tr_names = list(self.config['map_sets'].keys())
 
-        if save_npz:
-            np.savez(self.output_dir+'/cells_model.npz',
-                     tracers=tr_names,
-                     ls=self.ell_b,
-                     dls=model_cls)
-            return
-        s = sacc.Sacc()
-        for tn in tr_names:
-            t = self.s.tracers[tn]
-            s.add_tracer('NuMap', tn, quantity='cmb_polarization',
-                         spin=2, nu=t.nu, bandpass=t.bandpass,
-                         ell=t.ell, beam=t.beam, nu_unit='GHz',
-                         map_unit='uK_CMB')
-        for b1, b2, p1, p2, m1, m2, ind in self._freq_pol_iterator():
-            cl = model_cls[:, m1, m2]
-            pol1 = self.pols[p1].lower()
-            pol2 = self.pols[p2].lower()
-            cltyp = f'cl_{pol1}{pol2}'
-            win = sacc.BandpowerWindow(self.bpw_l, self.windows[ind].T)
-            s.add_ell_cl(cltyp, b1, b2, self.ell_b, cl, window=win)
+        for comp in ["all", "cmb", "dust", "synch"]:
+            label = "" if comp == "all" else f"_{comp}"
+            if self.per_bandpower_model:
+                model_cls = []
+                for i_bpw in range(self.n_bpws):
+                    if at_min:
+                        sampler = self.minimizer(i_bpw)
+                        p = np.array(sampler)
+                    else:
+                        p = self.params.p0
+                    pars = self.params.build_params(p, component=comp)
+                    print(f"predicted_spectra, pars {comp}", pars)
 
-        s.add_covariance(self.bbcovar)
-        s.save_fits(self.output_dir+'/cells_model.fits',
-                    overwrite=True)
-        return
+                    # Evaluate the per-bandpower model at the respective
+                    # bandpower
+                    model_cls += [self.model(pars)[i_bpw]]
+
+                model_cls = np.array(model_cls, dtype=np.float64)
+            else:
+                if at_min:
+                    sampler = self.minimizer()
+                    p = np.array(sampler)
+                else:
+                    p = self.params.p0
+                pars = self.params.build_params(p)
+                model_cls = self.model(pars)
+
+            if save_npz:
+                np.savez(f"{self.output_dir}/cells_model{label}.npz",
+                         tracers=tr_names,
+                         ls=self.ell_b,
+                         dls=model_cls)
+            else:
+                # If we save the best-fit model as a sacc file
+                s = sacc.Sacc()
+                for tn in tr_names:
+                    t = self.s.tracers[tn]
+                    s.add_tracer('NuMap', tn, quantity='cmb_polarization',
+                                 spin=2, nu=t.nu, bandpass=t.bandpass,
+                                 ell=t.ell, beam=t.beam, nu_unit='GHz',
+                                 map_unit='uK_CMB')
+                for b1, b2, p1, p2, m1, m2, ind in self._freq_pol_iterator():
+                    cl = model_cls[:, m1, m2]
+                    pol1 = self.pols[p1].lower()
+                    pol2 = self.pols[p2].lower()
+                    cltyp = f'cl_{pol1}{pol2}'
+                    win = sacc.BandpowerWindow(self.bpw_l, self.windows[ind].T)
+                    s.add_ell_cl(cltyp, b1, b2, self.ell_b, cl, window=win)
+
+                s.add_covariance(self.bbcovar)
+                s.save_fits(f"{self.output_dir}/cells_model{label}.fits",
+                            overwrite=True)
 
     def run(self):
         """
@@ -875,64 +935,157 @@ class BBCompSep(object):
 
         # Get the chi2 and best-fit estimates
         from scipy.stats import chi2 as scipy_chi2
-        sampler = self.minimizer()
-        chi2 = -2*self.lnprob(sampler)
-        ndof = len(self.bbcovar)
-        kwargs = {
-            "params": sampler,
-            "names": self.params.p_free_names,
-            "chi2": chi2,
-            "ndof": len(self.bbcovar),
-            "pte": scipy_chi2.sf(chi2, ndof, loc=0, scale=1)
-        }
-        np.savez(self.output_dir+'/chi2.npz', **kwargs)
-        with open(self.output_dir+'/chi2.txt', 'w') as f:
-            for key, value in kwargs.items():
-                f.write('%s: %s\n' % (key, value))
-        print("Saved best-fit parameters")
+
+        if self.per_bandpower_model:
+
+            # MPI related initialization
+            # NOTE: The parallelization is not well defined if both `sim_ids`
+            # and `per_bandpower_model` are not None in the yaml file.
+            rank, size, comm = mpi.init(True)
+
+            # Initialize tasks for MPI sharing
+            mpi_shared_list = range(self.n_bpws)
+
+            # Every rank must have the same shared list
+            mpi_shared_list = comm.bcast(mpi_shared_list, root=0)
+            task_ids = mpi.distribute_tasks(size, rank, len(mpi_shared_list),
+                                            logger=None)
+            local_mpi_list = [mpi_shared_list[i] for i in task_ids]
+
+            for i_bpw in local_mpi_list:
+                sampler = self.minimizer(i_bpw)
+                chi2 = -2*self.lnprob(sampler, i_bpw)
+                ndof = self.ncross
+                kwargs = {
+                    "params": sampler,
+                    "names": self.params.p_free_names,
+                    "chi2": chi2,
+                    "ndof": ndof,
+                    "pte": scipy_chi2.sf(chi2, ndof, loc=0, scale=1)
+                }
+                np.savez(
+                    f'{self.output_dir}/chi2_bpw{int(i_bpw):02}.npz',
+                    **kwargs)
+                with open(f'{self.output_dir}/chi2_bpw{int(i_bpw):02}.txt', 'w') as f:  # noqa: E501
+                    for key, value in kwargs.items():
+                        f.write('%s: %s\n' % (key, value))
+            print("Saved best-fit parameters")
+        else:
+            sampler = self.minimizer()
+            chi2 = -2*self.lnprob(sampler)
+            ndof = len(self.bbcovar)
+            kwargs = {
+                "params": sampler,
+                "names": self.params.p_free_names,
+                "chi2": chi2,
+                "ndof": len(self.bbcovar),
+                "pte": scipy_chi2.sf(chi2, ndof, loc=0, scale=1)
+            }
+            np.savez(self.output_dir+'/chi2.npz', **kwargs)
+            with open(self.output_dir+'/chi2.txt', 'w') as f:
+                for key, value in kwargs.items():
+                    f.write('%s: %s\n' % (key, value))
+            print("Saved best-fit parameters")
 
         # Get best-fit power spectra
         at_min = self.config.get('predict_at_minimum', True)
         save_npz = not self.config.get('predict_to_sacc', False)
         sampler = self.predicted_spectra(at_min=at_min, save_npz=save_npz)
-        print("Predicted spectra saved")
+        print("Saved predicted spectra")
 
         if self.config.get('sampler') == 'emcee':
-            sampler, timing = self.emcee_sampler()
-            np.savez(self.output_dir+'/emcee.npz',
-                     chain=sampler.chain,
-                     names=self.params.p_free_names,
-                     time=timing)
-            print("Finished sampling", timing)
+            if self.per_bandpower_model:
+                for i_bpw in local_mpi_list:
+                    sampler, timing = self.emcee_sampler(i_bpw)
+                    np.savez(
+                        f'{self.output_dir}/emcee_bpw{i_bpw:02}.npz',
+                        chain=sampler.chain,
+                        names=self.params.p_free_names,
+                        time=timing)
+                    print(
+                        f"Finished sampling (bandpower {i_bpw+1/self.n_bpws}) "
+                        f"in {timing:.3f} seconds.")
+            else:
+                sampler, timing = self.emcee_sampler()
+                np.savez(self.output_dir+'/emcee.npz',
+                         chain=sampler.chain,
+                         names=self.params.p_free_names,
+                         time=timing)
+                print("Finished sampling", timing)
 
         elif self.config.get('sampler') == 'polychord':
             os.makedirs(self.output_dir + '/polychord/clusters', exist_ok=True)
-            sampler = self.polychord_sampler()
-            print("Finished sampling")
+            if self.per_bandpower_model:
+                for i_bpw in local_mpi_list:
+                    sampler = self.polychord_sampler(i_bpw)
+                    print(
+                        f"Finished sampling (bandpower {i_bpw+1/self.n_bpws}) "
+                        f"in {timing:.3f} seconds.")
+            else:
+                sampler = self.polychord_sampler()
+                print("Finished sampling")
 
         elif self.config.get('sampler') == 'fisher':
-            p0, fisher = self.fisher()
-            cov = np.linalg.inv(fisher)
-            for i, (n, p) in enumerate(zip(self.params.p_free_names, p0)):
-                print(n+" = %.3lE +- %.3lE" % (p, np.sqrt(cov[i, i])))
-            np.savez(self.output_dir+'/fisher.npz',
-                     params=p0, fisher=fisher,
-                     names=self.params.p_free_names)
+            if self.per_bandpower_model:
+                for i_bpw in local_mpi_list:
+                    p0, fisher = self.fisher(i_bpw)
+                    cov = np.linalg.inv(fisher)
+                    for i, (n, p) in enumerate(zip(self.params.p_free_names, p0)):  # noqa: E501
+                        print(n+" = %.3lE +- %.3lE" % (p, np.sqrt(cov[i, i])))
+                    np.savez(
+                        f"{self.output_dir}/fisher_"
+                        f"bpw{str(int(i_bpw)):02}.npz",
+                        params=p0, fisher=fisher,
+                        names=self.params.p_free_names
+                    )
+            else:
+                p0, fisher = self.fisher()
+                cov = np.linalg.inv(fisher)
+                for i, (n, p) in enumerate(zip(self.params.p_free_names, p0)):
+                    print(n+" = %.3lE +- %.3lE" % (p, np.sqrt(cov[i, i])))
+                np.savez(self.output_dir+'/fisher.npz',
+                         params=p0, fisher=fisher,
+                         names=self.params.p_free_names)
 
         elif self.config.get('sampler') == 'single_point':
-            sampler = self.singlepoint()
-            np.savez(self.output_dir+'/single_point.npz',
-                     chi2=sampler, ndof=len(self.bbcovar),
-                     names=self.params.p_free_names)
-            print("Chi2:", sampler, len(self.bbcovar))
+            if self.per_bandpower_model:
+                for i_bpw in local_mpi_list:
+                    sampler = self.singlepoint(i_bpw)
+                    np.savez(
+                        f"{self.output_dir}/single_point_"
+                        f"bpw{str(int(i_bpw)):02}.npz",
+                        chi2=sampler,
+                        ndof=len(self.bbcovar),
+                        names=self.params.p_free_names
+                    )
+                    print(f"Chi2 (bandpower {i_bpw+1/self.n_bpws}):",
+                          sampler, "ndof", ndof)
+            else:
+                sampler = self.singlepoint()
+                np.savez(self.output_dir+'/single_point.npz',
+                         chi2=sampler, ndof=len(self.bbcovar),
+                         names=self.params.p_free_names)
+                print("Chi2:", sampler, ndof)
 
         elif self.config.get('sampler') == 'timing':
-            sampler = self.timing()
-            np.savez(self.output_dir+'/timing.npz',
-                     timing=sampler[1],
-                     names=self.params.p_free_names)
-            print("Total time:", sampler[0])
-            print("Time per eval:", sampler[1])
+            if self.per_bandpower_model:
+                for i_bpw in local_mpi_list:
+                    sampler = self.timing(i_bpw)
+                    np.savez(f"{self.output_dir}/timing_"
+                             f"bpw{str(int(i_bpw)):02}.npz",
+                             timing=sampler[1],
+                             names=self.params.p_free_names)
+                    print(f"Total time (bandpower {i_bpw+1/self.n_bpws}):",
+                          sampler[0])
+                    print(f"Time per eval (bandpower {i_bpw+1/self.n_bpws}):",
+                          sampler[1])
+            else:
+                sampler = self.timing()
+                np.savez(self.output_dir+'/timing.npz',
+                         timing=sampler[1],
+                         names=self.params.p_free_names)
+                print("Total time:", sampler[0])
+                print("Time per eval:", sampler[1])
         else:
             raise ValueError("Unknown sampler")
 
@@ -958,28 +1111,35 @@ def main(args):
         else:
             sim_ids = np.array([int(sim_ids)])
     else:
-        sim_ids = [None]
+        sim_ids = local_mpi_list = [None]
+    if len(sim_ids) > 1:
+        # MPI related initialization
+        # NOTE: The parallelization is not well defined if both `sim_ids`
+        # and `per_bandpower_model` are not None in the yaml file.
+        rank, size, comm = mpi.init(True)
 
-    # MPI related initialization
-    rank, size, comm = mpi.init(True)
+        # Initialize tasks for MPI sharing
+        mpi_shared_list = sim_ids
 
-    # Initialize tasks for MPI sharing
-    mpi_shared_list = sim_ids
+        # Every rank must have the same shared list
+        mpi_shared_list = comm.bcast(mpi_shared_list, root=0)
+        task_ids = mpi.distribute_tasks(size, rank, len(mpi_shared_list),
+                                        logger=None)
+        local_mpi_list = [mpi_shared_list[i] for i in task_ids]
 
-    # Every rank must have the same shared list
-    mpi_shared_list = comm.bcast(mpi_shared_list, root=0)
-    task_ids = mpi.distribute_tasks(size, rank, len(mpi_shared_list),
-                                    logger=None)
-    local_mpi_list = [mpi_shared_list[i] for i in task_ids]
-
+    start = time.time()
     for sim_id in local_mpi_list:
-        start = time.time()
         compsep = BBCompSep(args)
         setattr(compsep, "sim_id", sim_id)
         compsep.run()
-    mpi.print_rnk0(f"Processed {len(sim_ids)} simulations "
-                   f"in {time.time() - start:.1f} seconds.", rank)
-    comm.Barrier()
+
+    if len(sim_ids) > 1:
+        mpi.print_rnk0(f"Processed {len(sim_ids)} simulations "
+                       f"in {time.time() - start:.1f} seconds.", rank)
+        comm.Barrier()
+    else:
+        print(f"Processed {len(sim_ids)} simulations "
+              f"in {time.time() - start:.1f} seconds.")
 
 
 if __name__ == '__main__':
