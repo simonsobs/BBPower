@@ -84,9 +84,22 @@ class ParameterManager(object):
 
         self.p0 = np.array(self.p0)
 
-    def build_params(self, par):
+    def build_params(self, par, component="all"):
         params = dict(self.p_fixed)
         params.update(dict(zip(self.p_free_names, par)))
+        comp_params = {
+            "dust": ["amp_d_ee", "amp_d_bb", "amp_d_beta"],
+            "synch": ["amp_s_ee", "amp_s_bb", "amp_s_beta"],
+            "cmb": ["A_lens", "r_tensor"],
+        }
+
+        if component != "all":
+            if component not in ["dust", "synch", "cmb"]:
+                raise ValueError(
+                    "Only 'dust', 'synch', and 'cmb' are valid components.")
+            for p in comp_params[component]:
+                if p in params:
+                    params[p] = 0.
         return params
 
     def lnprior(self, par):
