@@ -27,6 +27,7 @@ def main(args):
     plot_dir = f"{config['chains_dir']}/plots"
     if not os.path.isdir(plot_dir):
         print(f"Making directory {plot_dir}")
+        os.makedirs(plot_dir, exist_ok=True)
 
     # Plot best-fit C_ells
     map_sets = list(config["global"]["map_sets"].keys())
@@ -51,21 +52,25 @@ def main(args):
 
         for comp in ["cmb", "synch", "dust", "all"]:
             label = "" if comp == "all" else f"_{comp}"
+            ls = ":" if comp == "all" else "-"
             fn_sacc_fiducial = f"{config['chains_dir']}/cls_fid.fits"
             fn_sacc_best_fit = f"{config['chains_dir']}/cells_model{label}.fits"  # noqa: E501
             s = sacc.Sacc.load_fits(fn_sacc_best_fit)
             lb, db = s.get_ell_cl("cl_bb", tr, tr)
-            ax.plot(lb, db, label=comp)
+            ax.plot(lb, db, label=comp, ls=ls)
             if comp == "all":
-                s_fid = sacc.Sacc.load_fits(fn_sacc_fiducial)
-                lb_fid, db_fid = s_fid.get_ell_cl("cl_bb", tr, tr)
-                lmin = config["BBPlotter"]["lmin_plot"]
-                lmax = config["BBPlotter"]["lmax_plot"]
-                lmsk = np.logical_and(lb_fid >= lmin, lb_fid <= lmax)
                 ax.errorbar(l_data, cl_data, err_data, color="k", ls="",
                             marker=".", label="data")
-                ax.plot(lb_fid[lmsk], db_fid[lmsk], "k--", label="fiducial")
-        ax.set_title(tr, y=0.9, va="top")
+                if os.path.isfile(fn_sacc_fiducial):
+                    s_fid = sacc.Sacc.load_fits(fn_sacc_fiducial)
+                    lb_fid, db_fid = s_fid.get_ell_cl(
+                        "cl_bb", tr, tr)
+                    lmin = config["BBPlotter"]["lmin_plot"]
+                    lmax = config["BBPlotter"]["lmax_plot"]
+                    lmsk = np.logical_and(lb_fid >= lmin, lb_fid <= lmax)
+                    ax.plot(lb_fid[lmsk], db_fid[lmsk], "k--",
+                            label="fiducial")
+        ax.set_title(tr, y=0.9, va="top", fontsize=9)
         ax.set_ylabel(r"$D^{BB}_\ell$")
     axes[-1].set_xlabel(r"$\ell$")
     axes[0].legend(frameon=False, bbox_to_anchor=(1.03, 1), loc='upper left')
