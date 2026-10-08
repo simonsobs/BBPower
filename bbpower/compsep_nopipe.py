@@ -50,13 +50,11 @@ class BBCompSep(object):
         setattr(self, "data", self.config["data"])
 
         # Decide whether to apply a per-bandpower amplitude model, (default no)
-        self.do_bandpowers = False
-        if hasattr(self.config, "per_bandpower_model"):
-            self.do_bandpowers = self.config["per_bandpower_model"]
-        setattr(
-            self,
-            "per_bandpower_model",
-            self.config["per_bandpower_model"])
+        self.per_bandpower_model = False
+        if "per_bandpower_model" in self.config:
+            setattr(self,
+                    "per_bandpower_model",
+                    self.config["per_bandpower_model"])
 
     def setup_compsep(self):
         """
@@ -233,6 +231,7 @@ class BBCompSep(object):
         self.n_ell = len(self.bpw_l)
         self.n_bpws = len(self.ell_b)
         # D_ell factor
+        # self.dl2cl = 1.e-12 * 2 * np.pi / (self.bpw_l * (self.bpw_l + 1))
         self.dl2cl = 2 * np.pi / (self.bpw_l * (self.bpw_l + 1))
         self.windows = np.zeros([self.ncross, self.n_bpws, self.n_ell])
 
@@ -289,7 +288,7 @@ class BBCompSep(object):
                  ell=self.ell_b, cl=self.bbdata, invcov=self.invcov)
 
         if self.per_bandpower_model:
-            self.invcov_ell = np.zeros([self.n_bpws, self.ncross, self.ncross]) 
+            self.invcov_ell = np.zeros([self.n_bpws, self.ncross, self.ncross])
             for ell in range(self.n_bpws):
                 invcov = np.linalg.solve(cv2d[ell, :, ell, :],
                                          np.identity(self.ncross))
@@ -877,7 +876,6 @@ class BBCompSep(object):
                     else:
                         p = self.params.p0
                     pars = self.params.build_params(p, component=comp)
-                    print(f"predicted_spectra, pars {comp}", pars)
 
                     # Evaluate the per-bandpower model at the respective
                     # bandpower
@@ -1003,7 +1001,8 @@ class BBCompSep(object):
                         names=self.params.p_free_names,
                         time=timing)
                     print(
-                        f"Finished sampling (bandpower {i_bpw+1/self.n_bpws}) "
+                        "Finished sampling "
+                        f"(bandpower {i_bpw+1}/{self.n_bpws}) "
                         f"in {timing:.3f} seconds.")
             else:
                 sampler, timing = self.emcee_sampler()
@@ -1019,7 +1018,8 @@ class BBCompSep(object):
                 for i_bpw in local_mpi_list:
                     sampler = self.polychord_sampler(i_bpw)
                     print(
-                        f"Finished sampling (bandpower {i_bpw+1/self.n_bpws}) "
+                        "Finished sampling (bandpower "
+                        f"{i_bpw+1}/{self.n_bpws}) "
                         f"in {timing:.3f} seconds.")
             else:
                 sampler = self.polychord_sampler()
@@ -1058,7 +1058,7 @@ class BBCompSep(object):
                         ndof=len(self.bbcovar),
                         names=self.params.p_free_names
                     )
-                    print(f"Chi2 (bandpower {i_bpw+1/self.n_bpws}):",
+                    print(f"Chi2 (bandpower {i_bpw+1}/{self.n_bpws}):",
                           sampler, "ndof", ndof)
             else:
                 sampler = self.singlepoint()
@@ -1075,9 +1075,10 @@ class BBCompSep(object):
                              f"bpw{str(int(i_bpw)):02}.npz",
                              timing=sampler[1],
                              names=self.params.p_free_names)
-                    print(f"Total time (bandpower {i_bpw+1/self.n_bpws}):",
+                    print(f"Total time (bandpower {i_bpw+1}/{self.n_bpws}):",
                           sampler[0])
-                    print(f"Time per eval (bandpower {i_bpw+1/self.n_bpws}):",
+                    print("Time per eval (bandpower "
+                          f"{i_bpw+1}/{self.n_bpws}):",
                           sampler[1])
             else:
                 sampler = self.timing()
